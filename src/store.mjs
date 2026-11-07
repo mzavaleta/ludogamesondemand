@@ -4,12 +4,58 @@ import { dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { buildDynamicTemplateGame } from "./prompt-engine.mjs";
 
+/**
+ * @typedef {Object} GameRow
+ * @property {string} id
+ * @property {string} title
+ * @property {string} prompt
+ * @property {string} html
+ * @property {string} provider
+ * @property {string} model
+ * @property {string} owner_hash
+ * @property {string} created_at
+ * @property {string} updated_at
+ */
+
+/**
+ * @typedef {Object} RevisionRow
+ * @property {string} id
+ * @property {string} game_id
+ * @property {string} prompt
+ * @property {string} html
+ * @property {string} created_at
+ */
+
+/**
+ * @typedef {Object} AuthContext
+ * @property {string} [viewerHash]
+ * @property {boolean} [isAdmin]
+ */
+
+/**
+ * @param {string} token
+ * @returns {string}
+ */
 export function hashCreatorToken(token) {
   const clean = String(token || "").trim();
   if (!clean) return "";
   return createHash("sha256").update(`ludo-creator:${clean}`).digest("hex");
 }
 
+/**
+ * @param {string} [dbPath]
+ * @returns {{
+ *   listGames: (auth?: AuthContext) => any[],
+ *   getGame: (id: string, auth?: AuthContext) => any,
+ *   canModifyGame: (id: string, auth?: AuthContext) => boolean,
+ *   createGame: (input: any, auth?: AuthContext) => any,
+ *   cloneGame: (sourceId: string, opts?: any, auth?: AuthContext) => any,
+ *   updateGame: (id: string, input: any, auth?: AuthContext) => any,
+ *   restoreRevision: (gameId: string, revisionId: string, auth?: AuthContext) => any,
+ *   deleteGame: (id: string) => boolean,
+ *   close: () => void,
+ * }}
+ */
 export function createGameStore(dbPath = "./data/ludo.db") {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
@@ -84,6 +130,7 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     }
   } else {
     // Refresh unmodified built-in starter games so template engine fixes apply to existing DBs
+    /** @type {any[]} */
     const starterRows = db
       .prepare(`SELECT id, title, prompt FROM games WHERE model = 'built-in-starter'`)
       .all();
@@ -93,8 +140,10 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     }
   }
 
+  /** @param {string} gameId @returns {RevisionRow[]} */
   function getRevisions(gameId) {
-    return db
+    /** @type {any} */
+    const rows = db
       .prepare(
         `SELECT id, game_id, prompt, html, created_at
          FROM revisions
@@ -102,8 +151,14 @@ export function createGameStore(dbPath = "./data/ludo.db") {
          ORDER BY created_at DESC, rowid DESC`
       )
       .all(gameId);
+    return rows;
   }
 
+  /**
+   * @param {GameRow | null} row
+   * @param {{ viewerHash?: string, isAdmin?: boolean }} [auth]
+   * @returns {any}
+   */
   function formatGameRow(row, { viewerHash = "", isAdmin = false } = {}) {
     if (!row) return null;
     const isOwner = Boolean(viewerHash && row.owner_hash && row.owner_hash === viewerHash);
@@ -117,7 +172,9 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     };
   }
 
+  /** @param {string} id @param {AuthContext} [auth] @returns {any} */
   function getGame(id, auth = {}) {
+    /** @type {any} */
     const row = db
       .prepare(
         `SELECT id, title, prompt, html, provider, model, owner_hash, created_at, updated_at
@@ -127,14 +184,18 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     return formatGameRow(row, auth);
   }
 
+  /** @param {string} id @param {AuthContext} [auth] @returns {boolean} */
   function canModifyGame(id, { viewerHash = "", isAdmin = false } = {}) {
+    /** @type {any} */
     const row = db.prepare(`SELECT owner_hash FROM games WHERE id = ?`).get(id);
     if (!row) return false;
     if (isAdmin) return true;
     return Boolean(viewerHash && row.owner_hash && row.owner_hash === viewerHash);
   }
 
+  /** @param {AuthContext} [auth] @returns {any[]} */
   function listGames(auth = {}) {
+    /** @type {any[]} */
     const rows = db
       .prepare(
         `SELECT id, title, prompt, html, provider, model, owner_hash, created_at, updated_at
@@ -145,6 +206,11 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     return rows.map((row) => formatGameRow(row, auth));
   }
 
+  /**
+   * @param {{ title: string, prompt: string, html: string, provider?: string, model?: string, ownerHash?: string }} input
+   * @param {AuthContext} [auth]
+   * @returns {any}
+   */
   function createGame(
     {
       title,
@@ -175,7 +241,14 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     });
   }
 
+  /**
+   * @param {string} sourceId
+   * @param {{ ownerHash?: string, newTitle?: string }} [opts]
+   * @param {AuthContext} [auth]
+   * @returns {any}
+   */
   function cloneGame(sourceId, { ownerHash, newTitle } = {}, auth = {}) {
+    /** @type {any} */
     const source = db
       .prepare(
         `SELECT id, title, prompt, html, provider, model FROM games WHERE id = ?`
@@ -200,7 +273,14 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     );
   }
 
+  /**
+   * @param {string} id
+   * @param {{ title?: string, prompt?: string, html?: string, provider?: string, model?: string }} input
+   * @param {AuthContext} [auth]
+   * @returns {any}
+   */
   function updateGame(id, { title, prompt, html, provider, model }, auth = {}) {
+    /** @type {any} */
     const current = db
       .prepare(
         `SELECT id, title, prompt, html, provider, model, owner_hash FROM games WHERE id = ?`
@@ -234,12 +314,15 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     });
   }
 
+  /** @param {string} gameId @param {string} revisionId @param {AuthContext} [auth] @returns {any} */
   function restoreRevision(gameId, revisionId, auth = {}) {
+    /** @type {any} */
     const rev = db
       .prepare(`SELECT id, game_id, prompt, html FROM revisions WHERE id = ? AND game_id = ?`)
       .get(revisionId, gameId);
     if (!rev) return null;
 
+    /** @type {any} */
     const current = db.prepare(`SELECT owner_hash FROM games WHERE id = ?`).get(gameId);
     const now = new Date().toISOString();
     db.prepare(`UPDATE games SET prompt = ?, html = ?, updated_at = ? WHERE id = ?`).run(
@@ -254,11 +337,13 @@ export function createGameStore(dbPath = "./data/ludo.db") {
     });
   }
 
+  /** @param {string} id @returns {boolean} */
   function deleteGame(id) {
     const res = db.prepare(`DELETE FROM games WHERE id = ?`).run(id);
     return res.changes > 0;
   }
 
+  /** @returns {void} */
   function close() {
     db.close();
   }

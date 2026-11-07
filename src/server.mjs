@@ -25,6 +25,7 @@ const MIME_TYPES = {
   ".ico": "image/x-icon",
 };
 
+/** @param {any} res @param {number} status @param {any} payload @returns {void} */
 function sendJson(res, status, payload) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -33,6 +34,7 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+/** @param {any} req @returns {Promise<any>} */
 async function readJsonBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -43,6 +45,7 @@ async function readJsonBody(req) {
   return JSON.parse(raw);
 }
 
+/** @param {any} provided @param {any} expected @returns {boolean} */
 function safeCompareSecret(provided, expected) {
   if (!provided || !expected) return false;
   const a = Buffer.from(String(provided));
@@ -56,6 +59,7 @@ const IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 const ENVELOPE_FORMAT = "ludogame";
 const ENVELOPE_VERSION = 1;
 
+/** @param {any} title @returns {string} */
 function slugify(title) {
   return (
     String(title || "game")
@@ -66,15 +70,18 @@ function slugify(title) {
   );
 }
 
+/** @param {any} text @returns {string} */
 function sha256Hex(text) {
   return createHash("sha256").update(String(text)).digest("hex");
 }
 
+/** @param {any} sha256 @param {any} exportKey @returns {string} */
 function signEnvelope(sha256, exportKey) {
   if (!exportKey) return "";
   return createHmac("sha256", exportKey).update(sha256).digest("hex");
 }
 
+/** @param {any} game @param {any} exportKey @returns {any} */
 function buildEnvelope(game, exportKey) {
   const sha256 = sha256Hex(game.html);
   return {
@@ -94,6 +101,7 @@ function buildEnvelope(game, exportKey) {
 }
 
 /** Validates an imported envelope. Returns { ok, error } or { ok:true, value }. */
+/** @param {any} payload @param {any} exportKey @returns {any} */
 function verifyEnvelope(payload, exportKey) {
   if (!payload || typeof payload !== "object") return { ok: false, error: "Empty or invalid package." };
   if (payload.format !== ENVELOPE_FORMAT) {
@@ -131,14 +139,17 @@ function verifyEnvelope(payload, exportKey) {
 }
 
 /** Redacts credentials from an error before it is logged or returned to a client. */
+/** @param {any} err @param {any} apiKey @returns {string} */
 function sanitizeError(err, apiKey) {
   return redactSecrets(err?.message || err || "Unknown error", apiKey);
 }
 
 /** Normalizes OpenAI-compatible, Ollama and bare-array model payloads into a flat id list. */
+/** @param {any} payload @returns {string[]} */
 function normalizeModels(payload) {
+  /** @type {any[]} */
   const out = [];
-  const push = (candidate) => {
+  const push = (/** @type {any} */ candidate) => {
     const id = typeof candidate === "string" ? candidate : candidate?.id || candidate?.name || candidate?.model;
     if (id && typeof id === "string") out.push(id);
   };
@@ -154,10 +165,11 @@ const NON_CHAT_PATTERN =
   /embed|whisper|tts|dall-e|moderation|transcri|rerank|text-to-speech|realtime|computer-use|image-|audio/i;
 
 /** Provider catalogues also list embeddings/audio/image models; keep chat-capable ids when meaningful. */
+/** @param {any} models @param {any} provider @returns {any} */
 function filterChatModels(models, provider) {
   // Custom endpoints expose arbitrary names the user controls — never second-guess them.
   if (provider === "openai-compatible" || provider === "template") return models;
-  const filtered = models.filter((id) => !NON_CHAT_PATTERN.test(id));
+  const filtered = models.filter((/** @type {any} */ id) => !NON_CHAT_PATTERN.test(String(id)));
   return filtered.length > 0 ? filtered : models;
 }
 
@@ -173,6 +185,8 @@ export function createAppServer({
   /**
    * Prints a provider failure to the server console as a single copy-pasteable line.
    * The API key is redacted before it ever reaches the log.
+   * @param {any} opts
+   * @returns {string}
    */
   function logAiFailure({ endpoint, provider, model, baseUrl, err, apiKey, status }) {
     const line = [
@@ -193,6 +207,8 @@ export function createAppServer({
   /**
    * Lists models for the caller's ephemeral provider config.
    * Credentials are forwarded only for this single request and never persisted or echoed back.
+   * @param {any} [cfg]
+   * @returns {Promise<any>}
    */
   async function listProviderModels(cfg = {}) {
     const provider = cfg.provider || "ollama";
@@ -206,13 +222,13 @@ export function createAppServer({
       };
     }
 
-    const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS["openai-compatible"];
+    const preset = PROVIDER_PRESETS[/** @type {keyof typeof PROVIDER_PRESETS} */ (provider)] || PROVIDER_PRESETS["openai-compatible"];
     const baseUrl = (cfg.baseUrl || preset.baseUrl || "http://localhost:11434/v1").replace(/\/+$/, "");
 
     // Some providers serve their catalogue outside the chat prefix (e.g. OpenCode Go).
     const usingPresetUrl =
       !cfg.baseUrl || cfg.baseUrl.replace(/\/+$/, "") === (preset.baseUrl || "").replace(/\/+$/, "");
-    const modelsUrl = usingPresetUrl && preset.modelsUrl ? preset.modelsUrl : `${baseUrl}/models`;
+    const modelsUrl = usingPresetUrl && (/** @type {any} */ (preset)).modelsUrl ? (/** @type {any} */ (preset)).modelsUrl : `${baseUrl}/models`;
 
     const headers = {};
     if (cfg.apiKey) {
@@ -260,7 +276,7 @@ export function createAppServer({
         const payload = await res.json();
         const found = filterChatModels(normalizeModels(payload), provider);
         // Defense in depth: never relay a model id that would echo the caller's own credential back.
-        const models = cfg.apiKey ? found.filter((id) => !id.includes(cfg.apiKey)) : found;
+        const models = cfg.apiKey ? found.filter((/** @type {any} */ id) => !String(id).includes(cfg.apiKey)) : found;
 
         if (models.length > 0) {
           return { ok: true, models, source: attempt.source, message: `${models.length} models found` };
@@ -287,6 +303,7 @@ export function createAppServer({
     };
   }
 
+  /** @param {any} req @returns {{ viewerHash: string, isAdmin: boolean }} */
   function extractCallerAuth(req) {
     const rawToken = req.headers["x-creator-token"] || "";
     const rawAdmin = req.headers["x-admin-key"] || "";
@@ -394,7 +411,7 @@ export function createAppServer({
           if (!existing) return sendJson(res, 404, { error: "Game not found." });
 
           // Only fields the package actually carries are replaced; undefined preserves the current value.
-          const text = (value, max) => {
+          const text = (/** @type {any} */ value, /** @type {any} */ max = undefined) => {
             if (typeof value !== "string") return undefined;
             const trimmed = value.trim();
             if (!trimmed) return undefined;
@@ -511,9 +528,9 @@ export function createAppServer({
             generated = buildDynamicTemplateGame(body.prompt, body.title || "");
             usedProvider = "template";
             usedModel = "built-in-fallback";
-            fallbackNote = `AI provider unreachable (${err.message}); created with Built-in Instant Generator.`;
+            fallbackNote = `AI provider unreachable (${(/** @type {any} */ (err))?.message || err}); created with Built-in Instant Generator.`;
           } else {
-            return sendJson(res, 502, { error: redactSecrets(err?.message || err, activeSettings.apiKey) });
+            return sendJson(res, 502, { error: redactSecrets((/** @type {any} */ (err))?.message || err, activeSettings.apiKey) });
           }
         }
 
@@ -643,7 +660,7 @@ export function createAppServer({
               apiKey: activeSettings.apiKey,
               err,
             });
-            return sendJson(res, 502, { error: redactSecrets(err?.message || err, activeSettings.apiKey) });
+            return sendJson(res, 502, { error: redactSecrets((/** @type {any} */ (err))?.message || err, activeSettings.apiKey) });
           }
 
           const updated = store.updateGame(
@@ -684,7 +701,7 @@ export function createAppServer({
         const content = await readFile(targetFile);
         const ext = extname(targetFile);
         res.writeHead(200, {
-          "Content-Type": MIME_TYPES[ext] || "application/octet-stream",
+          "Content-Type": MIME_TYPES[/** @type {keyof typeof MIME_TYPES} */ (ext)] || "application/octet-stream",
           // The app ships from a local server and changes often; never let the browser hold a stale copy.
           "Cache-Control": "no-cache",
         });
@@ -699,7 +716,7 @@ export function createAppServer({
         return sendJson(res, 404, { error: "Not found" });
       }
     } catch (err) {
-      return sendJson(res, 500, { error: redactSecrets(err?.message || err, "") || "Internal server error" });
+      return sendJson(res, 500, { error: redactSecrets((/** @type {any} */ (err))?.message || err, "") || "Internal server error" });
     }
   });
 

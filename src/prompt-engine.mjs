@@ -78,6 +78,10 @@ export const PROVIDER_PRESETS = {
   },
 };
 
+/**
+ * @param {string} description
+ * @returns {string}
+ */
 export function buildCreatePrompt(description) {
   return `Create a playable, mobile-first HTML5 game based on this request:
 
@@ -86,6 +90,12 @@ export function buildCreatePrompt(description) {
 Ensure full touch controls for mobile screens alongside keyboard controls, responsive layout, score/winner tracking, and Web Audio API sound effects. Return TITLE: <name> and the single \`\`\`html ... \`\`\` block.`;
 }
 
+/**
+ * @param {string} currentHtml
+ * @param {string} instruction
+ * @param {string} [currentTitle]
+ * @returns {string}
+ */
 export function buildModifyPrompt(currentHtml, instruction, currentTitle = "Game") {
   return `Modify the existing HTML5 game ("${currentTitle}") according to this user request:
 
@@ -103,6 +113,11 @@ First line: TITLE: <updated or existing game title>
 Followed by the complete updated HTML wrapped in \`\`\`html ... \`\`\`.`;
 }
 
+/**
+ * @param {string} raw
+ * @param {string} [fallbackTitle]
+ * @returns {{ title: string, html: string }}
+ */
 export function extractGamePayload(raw, fallbackTitle = "Custom HTML5 Game") {
   if (!raw || typeof raw !== "string") {
     throw new Error("Empty response from AI provider.");
@@ -134,6 +149,11 @@ export function extractGamePayload(raw, fallbackTitle = "Custom HTML5 Game") {
   return { title, html };
 }
 
+/**
+ * @param {string} promptText
+ * @param {string} [existingTitle]
+ * @returns {{ title: string, html: string }}
+ */
 export function buildDynamicTemplateGame(promptText, existingTitle = "") {
   const lower = promptText.toLowerCase();
   const isLudo = lower.includes("ludo") || lower.includes("board") || lower.includes("dice") || lower.includes("parchis");
@@ -171,7 +191,7 @@ export function buildDynamicTemplateGame(promptText, existingTitle = "") {
           .trim()
           .split(/\s+/)
           .slice(0, 4)
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .map((w) => String(w).charAt(0).toUpperCase() + String(w).slice(1).toLowerCase())
           .join(" ") || "Star Dodger Deluxe");
 
   return {
@@ -184,6 +204,11 @@ export function buildDynamicTemplateGame(promptText, existingTitle = "") {
  * Removes anything that looks like a credential from free-form text (provider error bodies, logs).
  * Applied at the point where the secret is still in scope, so every downstream surface is clean.
  */
+/**
+ * @param {string} text
+ * @param {string} [apiKey]
+ * @returns {string}
+ */
 export function redactSecrets(text, apiKey = "") {
   let out = String(text ?? "");
   if (apiKey) out = out.split(String(apiKey)).join("***");
@@ -194,6 +219,18 @@ export function redactSecrets(text, apiKey = "") {
   return out.slice(0, 200);
 }
 
+/**
+ * @param {{
+ *   mode?: string,
+ *   prompt: string,
+ *   currentHtml?: string,
+ *   currentTitle?: string,
+ *   settings?: any,
+ *   sessionId?: string,
+ *   fetchImpl?: any,
+ * }} opts
+ * @returns {Promise<{ title: string, html: string }>}
+ */
 export async function generateOrModifyGame({
   mode = "create",
   prompt,
@@ -212,7 +249,7 @@ export async function generateOrModifyGame({
     return buildDynamicTemplateGame(prompt, mode === "modify" ? currentTitle : "");
   }
 
-  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS["openai-compatible"];
+  const preset = PROVIDER_PRESETS[/** @type {keyof typeof PROVIDER_PRESETS} */ (provider)] || PROVIDER_PRESETS["openai-compatible"];
   const baseUrl = (settings.baseUrl || preset.baseUrl || "http://localhost:11434/v1").replace(/\/+$/, "");
   const model = settings.model || preset.defaultModel || "qwen2.5-coder:7b";
   const apiKey = settings.apiKey || "";
@@ -226,6 +263,7 @@ export async function generateOrModifyGame({
    * Identifies this client and, for OpenCode hosts, attaches the routing session id Go requires.
    * Sending it elsewhere would be noise, so it is scoped to opencode.ai.
    */
+  /** @type {any} */
   const baseHeaders = { "User-Agent": "ludo-game-on-demand/1.0" };
   if (sessionId && baseUrl.includes("opencode.ai")) {
     baseHeaders["x-opencode-session"] = sessionId;
@@ -290,6 +328,7 @@ export async function generateOrModifyGame({
   return extractGamePayload(rawText, currentTitle || "AI Game");
 }
 
+/** @param {any} str @returns {string} */
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, "&amp;")
@@ -298,6 +337,10 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * @param {{ title: string, promptText: string, accent: string, bg: string }} opts
+ * @returns {string}
+ */
 function buildLudoHtml({ title, promptText, accent, bg }) {
   const safeTitle = escapeHtml(title);
   const safePrompt = escapeHtml(promptText);
@@ -621,6 +664,10 @@ function buildLudoHtml({ title, promptText, accent, bg }) {
 </html>`;
 }
 
+/**
+ * @param {{ title: string, promptText: string, accent: string, bg: string }} opts
+ * @returns {string}
+ */
 function buildMemoryHtml({ title, promptText, accent, bg }) {
   const safeTitle = escapeHtml(title);
   const safePrompt = escapeHtml(promptText);
@@ -720,6 +767,10 @@ function buildMemoryHtml({ title, promptText, accent, bg }) {
 </html>`;
 }
 
+/**
+ * @param {{ title: string, promptText: string, accent: string, bg: string, speedMultiplier?: number }} opts
+ * @returns {string}
+ */
 function buildArcadeHtml({ title, promptText, accent, bg, speedMultiplier = 1.0 }) {
   const safeTitle = escapeHtml(title);
   const safePrompt = escapeHtml(promptText);
