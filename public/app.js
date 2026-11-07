@@ -783,7 +783,14 @@ function renderLibrary() {
     card.querySelector(".btn-export").addEventListener("click", () => handleExportGame(game));
 
     if (game.canEdit) {
-      card.querySelector(".btn-modify").addEventListener("click", () => openGameInEditor(game));
+      card.querySelector(".btn-modify").addEventListener("click", async () => {
+        try {
+          const { game: full } = await api(`/api/games/${game.id}`);
+          openGameInEditor(full);
+        } catch (err) {
+          showToast(err.message);
+        }
+      });
       card.querySelector(".btn-delete").addEventListener("click", () => handleDeleteGame(game));
     }
 

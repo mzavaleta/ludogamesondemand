@@ -157,18 +157,32 @@ export function createGameStore(dbPath = "./data/ludo.db") {
   /**
    * @param {GameRow | null} row
    * @param {{ viewerHash?: string, isAdmin?: boolean }} [auth]
+   * @param {{ includeHtml?: boolean, includeRevisions?: boolean, includeRevisionHtml?: boolean }} [opts]
    * @returns {any}
    */
-  function formatGameRow(row, { viewerHash = "", isAdmin = false } = {}) {
+  function formatGameRow(row, { viewerHash = "", isAdmin = false } = {}, opts = {}) {
     if (!row) return null;
+    const includeHtml = opts.includeHtml !== false;
+    const includeRevisions = opts.includeRevisions !== false;
+    const includeRevisionHtml = opts.includeRevisionHtml !== false;
     const isOwner = Boolean(viewerHash && row.owner_hash && row.owner_hash === viewerHash);
     const canEdit = Boolean(isAdmin || isOwner);
-    const { owner_hash, ...safeFields } = row;
+    const { owner_hash, html, ...safeFields } = row;
+    if (includeHtml) {
+      /** @type {any} */ (safeFields).html = html;
+    }
+    const revisions = includeRevisions
+      ? getRevisions(row.id).map((rev) => {
+          if (includeRevisionHtml) return rev;
+          const { html, ...rest } = rev;
+          return rest;
+        })
+      : undefined;
     return {
       ...safeFields,
       isOwner,
       canEdit,
-      revisions: getRevisions(row.id),
+      ...(includeRevisions ? { revisions } : {}),
     };
   }
 
@@ -203,7 +217,9 @@ export function createGameStore(dbPath = "./data/ludo.db") {
          ORDER BY updated_at DESC, rowid DESC`
       )
       .all();
-    return rows.map((row) => formatGameRow(row, auth));
+    return rows.map((row) =>
+      formatGameRow(row, auth, { includeHtml: false, includeRevisionHtml: false })
+    );
   }
 
   /**
