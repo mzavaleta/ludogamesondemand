@@ -73,5 +73,3 @@ initViews(els);
 initViewsAll(els);
 
 initApp();
-EOF
-echo done
