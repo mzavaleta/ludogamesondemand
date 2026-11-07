@@ -5,7 +5,8 @@ data/*.db-wal
 .env
 drafts/
 
-# Local tooling state, not part of the project
+# Local tooling state and working notes, not part of the project
 .atl/
 .engram/*
 !.engram/config.json
+odd/
