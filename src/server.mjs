@@ -34,10 +34,19 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+const MAX_BODY_BYTES = 6 * 1024 * 1024;
+
 /** @param {any} req @returns {Promise<any>} */
 async function readJsonBody(req) {
   const chunks = [];
+  let total = 0;
   for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_BODY_BYTES) {
+      const err = new Error("Request body too large.");
+      /** @type {any} */ (err).status = 413;
+      throw err;
+    }
     chunks.push(chunk);
   }
   const raw = Buffer.concat(chunks).toString("utf-8").trim();
@@ -312,12 +321,36 @@ export function createAppServer({
     return { viewerHash, isAdmin };
   }
 
+  const rateLimitMap = new Map();
+  /** @param {any} ip @returns {boolean} */
+  function isRateLimited(ip) {
+    const now = Date.now();
+    const windowMs = 60000;
+    const limit = 60;
+    let entry = rateLimitMap.get(ip);
+    if (!entry || now > entry.resetAt) {
+      entry = { count: 0, resetAt: now + windowMs };
+      rateLimitMap.set(ip, entry);
+    }
+    entry.count += 1;
+    return entry.count > limit;
+  }
+
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const { pathname } = url;
       const method = req.method || "GET";
       const auth = extractCallerAuth(req);
+
+      const isWrite = method === "POST" || method === "PUT" || method === "DELETE" || method === "PATCH";
+      if (isWrite && pathname.startsWith("/api/")) {
+        const ip = (req.headers["x-forwarded-for"] || "").toString().split(",")[0].trim() || req.socket?.remoteAddress || "unknown";
+        if (isRateLimited(ip)) {
+          res.setHeader("Retry-After", "60");
+          return sendJson(res, 429, { error: "Too many requests. Please slow down." });
+        }
+      }
 
       // Health check
       if (pathname === "/api/health" && method === "GET") {
