@@ -17,6 +17,16 @@ A local-hosted, mobile-first HTML5 game-on-demand web platform. Generate, modify
 9. **Portable Game Packages**: `⬇ Export` any game to a `.ludogame.json` envelope carrying metadata, the self-contained HTML, a `sha256` checksum and an HMAC signature. Import is **admin-only** (`/admin`), verifies both, and rebinds the copy to the importing instance — the dev → prod workflow.
 10. **Untrusted Game Containment**: game HTML is served with `connect-src 'none'` CSP and runs in an iframe **without** `allow-same-origin`, so a game can never read the app's `localStorage` (where your AI key lives) or reach the network. Provider errors are redacted at the origin, so no credential can land in logs, prompts, responses or the browser console.
 
+## Project layout
+
+```
+src/          Backend (Node): server.mjs, store.mjs, prompt-engine.mjs, infra/templates
+public/       Frontend (ES modules): app.js bootstrap + js/{storage,api,state,theme,player,navigation,settings,views}.mjs
+tests/        Node test runner suites (api, store, prompt-engine, ui, import-export)
+docs/         Published specification (docs/spec.md)
+odd/tasks/    Local working notes (gitignored)
+```
+
 ## Environment variables
 
 | Variable | Default | Purpose |
@@ -29,7 +39,7 @@ A local-hosted, mobile-first HTML5 game-on-demand web platform. Generate, modify
 
 ## Quick Start
 
-Requires **Node.js 22.5+** and **pnpm** (uses native built-in `node:sqlite`, zero external dependencies required, hardened with `.npmrc` `ignore-scripts=true`).
+Requires **Node.js 24+** and **pnpm** (uses native built-in `node:sqlite`, zero external dependencies required, hardened with `.npmrc` `ignore-scripts=true`).
 
 ```bash
 # Start the local server (defaults to http://0.0.0.0:3000)
@@ -40,4 +50,7 @@ pnpm dev
 
 # Run the automated test suite
 pnpm test
+
+# Type-check the JavaScript with JSDoc (no emit)
+pnpm typecheck
 ```
