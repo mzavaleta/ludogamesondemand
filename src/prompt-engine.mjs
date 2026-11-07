@@ -96,10 +96,16 @@ Ensure full touch controls for mobile screens alongside keyboard controls, respo
  * @param {string} [currentTitle]
  * @returns {string}
  */
-export function buildModifyPrompt(currentHtml, instruction, currentTitle = "Game") {
-  return `Modify the existing HTML5 game ("${currentTitle}") according to this user request:
+export function buildModifyPrompt(currentHtml, instruction, currentTitle = "Game", history = /** @type {any[]} */ ([])) {
+  const historyBlock =
+    Array.isArray(history) && history.length > 0
+      ? `PREVIOUS REQUESTS ON THIS GAME (oldest → newest, already applied; current HTML below reflects them):
+${history.map((h, i) => `${i + 1}. "${String(h).trim()}"`).join("\n")}
 
-"${instruction.trim()}"
+`
+      : "";
+
+  return `Modify the existing HTML5 game ("${currentTitle}").
 
 Preserve working mechanics, mobile-first touch + keyboard controls, and single-file self-contained structure while applying the requested changes.
 
@@ -107,6 +113,9 @@ CURRENT GAME HTML:
 \`\`\`html
 ${currentHtml}
 \`\`\`
+
+${historyBlock}USER REQUEST:
+"${instruction.trim()}"
 
 Return the updated game with:
 First line: TITLE: <updated or existing game title>
@@ -225,6 +234,7 @@ export function redactSecrets(text, apiKey = "") {
  *   prompt: string,
  *   currentHtml?: string,
  *   currentTitle?: string,
+ *   history?: any[],
  *   settings?: any,
  *   sessionId?: string,
  *   fetchImpl?: any,
@@ -236,6 +246,7 @@ export async function generateOrModifyGame({
   prompt,
   currentHtml = "",
   currentTitle = "",
+  history = [],
   settings = {},
   sessionId = "",
   fetchImpl = globalThis.fetch,
@@ -245,6 +256,10 @@ export async function generateOrModifyGame({
   }
 
   const provider = settings.provider || "ollama";
+  const isModify = mode === "modify" && !!currentHtml;
+  const temperature = isModify ? 0.2 : 0.6;
+  const maxTokens = settings.maxTokens || (isModify ? 16384 : 8192);
+
   if (provider === "template") {
     return buildDynamicTemplateGame(prompt, mode === "modify" ? currentTitle : "");
   }
@@ -256,7 +271,7 @@ export async function generateOrModifyGame({
 
   const userMessage =
     mode === "modify" && currentHtml
-      ? buildModifyPrompt(currentHtml, prompt, currentTitle)
+      ? buildModifyPrompt(currentHtml, prompt, currentTitle, history)
       : buildCreatePrompt(prompt);
 
   /**
@@ -273,6 +288,19 @@ export async function generateOrModifyGame({
     if (!apiKey) {
       throw new Error("Anthropic API key is required in AI Settings (or switch provider to Ollama / Built-in Generator).");
     }
+    /** @type {any} */
+    let anthropicContent = userMessage;
+    if (isModify) {
+      const marker = "USER REQUEST:";
+      const idx = userMessage.indexOf(marker);
+      if (idx > 0) {
+        anthropicContent = [
+          { type: "text", text: userMessage.slice(0, idx).trim(), cache_control: { type: "ephemeral" } },
+          { type: "text", text: userMessage.slice(idx).trim() },
+        ];
+      }
+    }
+
     const res = await fetchImpl(`${baseUrl}/messages`, {
       method: "POST",
       headers: {
@@ -283,9 +311,9 @@ export async function generateOrModifyGame({
       },
       body: JSON.stringify({
         model,
-        max_tokens: 8192,
+        max_tokens: maxTokens,
         system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userMessage }],
+        messages: [{ role: "user", content: anthropicContent }],
       }),
     });
 
@@ -310,7 +338,8 @@ export async function generateOrModifyGame({
     headers,
     body: JSON.stringify({
       model,
-      temperature: 0.6,
+      temperature,
+      max_tokens: maxTokens,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },

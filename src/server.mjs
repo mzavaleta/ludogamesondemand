@@ -644,6 +644,13 @@ export function createAppServer({
               prompt: body.prompt,
               currentHtml: existing.html,
               currentTitle: existing.title,
+              history: (Array.isArray(existing.revisions) ? existing.revisions : [])
+                .slice(1)
+                .map((/** @type {any} */ r) => r && r.prompt)
+                .filter(Boolean)
+                .reverse()
+                .slice(-6)
+                .filter((/** @type {any} */ p) => String(p).trim() !== String(body.prompt || "").trim()),
               settings: activeSettings,
               // Stable per conversation: every edit of the same game reuses the routing session.
               sessionId: gameId,
