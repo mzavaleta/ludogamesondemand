@@ -1,0 +1,10 @@
+{
+  "name": "Ludo Game-On-Demand",
+  "short_name": "LudoArcade",
+  "description": "Mobile-first AI HTML5 game generator and local game library.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#00f5d4",
+  "orientation": "portrait"
+}

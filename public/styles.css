@@ -1,0 +1,775 @@
+:root,
+[data-theme="dark"] {
+  --md-sys-color-primary: #00c896;
+  --md-sys-color-on-primary: #062119;
+  --md-sys-color-primary-container: rgba(0, 200, 150, 0.18);
+  --md-sys-color-surface: #0f141c;
+  --md-sys-color-surface-container: #18202c;
+  --md-sys-color-surface-container-high: #232d3d;
+  --md-sys-color-outline: #364356;
+  --md-sys-color-on-surface: #f1f5f9;
+  --md-sys-color-on-surface-variant: #94a3b8;
+  --md-sys-color-danger: #f43f5e;
+  --md-elevation-1: 0 2px 8px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.24);
+  --md-elevation-2: 0 8px 24px rgba(0, 0, 0, 0.42);
+  --nav-height: 76px;
+}
+
+[data-theme="light"] {
+  --md-sys-color-primary: #008562;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: rgba(0, 133, 98, 0.14);
+  --md-sys-color-surface: #f8fafc;
+  --md-sys-color-surface-container: #ffffff;
+  --md-sys-color-surface-container-high: #eef2f6;
+  --md-sys-color-outline: #cbd5e1;
+  --md-sys-color-on-surface: #0f172a;
+  --md-sys-color-on-surface-variant: #475569;
+  --md-sys-color-danger: #e11d48;
+  --md-elevation-1: 0 2px 8px rgba(15, 23, 42, 0.07), 0 1px 2px rgba(15, 23, 42, 0.05);
+  --md-elevation-2: 0 10px 28px rgba(15, 23, 42, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  font-family: "Roboto", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: var(--md-sys-color-surface-container);
+  border-bottom: 1px solid var(--md-sys-color-outline);
+  box-shadow: var(--md-elevation-1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-icon {
+  font-size: 1.65rem;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.provider-badge {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--md-sys-color-primary);
+}
+
+.pill-btn {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--md-elevation-1);
+  transition: transform 0.12s ease, filter 0.15s ease;
+}
+
+.pill-btn:active {
+  transform: scale(0.97);
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
+}
+
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 190px;
+  max-width: 300px;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--md-sys-color-outline);
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: 0.92rem;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(275px, 1fr));
+  gap: 16px;
+}
+
+.game-card {
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 24px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  box-shadow: var(--md-elevation-1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.game-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--md-elevation-2);
+}
+
+.game-card h3 {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  color: var(--md-sys-color-on-surface);
+}
+
+.game-prompt-preview {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--md-sys-color-on-surface-variant);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.game-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.card-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Primary action owns the first row; the rest sit in an even 2-column grid. */
+.card-actions > .btn-play {
+  grid-column: 1 / -1;
+}
+
+.card-actions > button {
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.btn-play {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border: none;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.btn-edit {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.btn-delete {
+  background: rgba(244, 63, 94, 0.12);
+  color: var(--md-sys-color-danger);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.btn-export {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-surface);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 999px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.setup-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.card {
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 24px;
+  padding: 20px;
+  box-shadow: var(--md-elevation-1);
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.card h2 {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+}
+
+.muted {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.88rem;
+  margin-top: 0;
+}
+
+.muted-xs {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.76rem;
+}
+
+.stack-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.field input[type="text"],
+.field input[type="url"],
+.field input[type="password"],
+.field textarea,
+.field select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--md-sys-color-outline);
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  outline: 2px solid var(--md-sys-color-primary);
+  border-color: transparent;
+}
+
+.code-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem !important;
+}
+
+/* Read-only prompt viewer */
+.prompt-view {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem !important;
+  line-height: 1.45;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-high) !important;
+  resize: vertical;
+}
+
+.revision-list details.revision-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.block-title {
+  margin: 20px 0 10px;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+  padding-top: 14px;
+  border-top: 1px solid var(--md-sys-color-outline);
+}
+
+.revision-list details.revision-item > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+/* Material Color Swatches & Picker */
+.color-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--md-sys-color-surface);
+  border: 1px solid var(--md-sys-color-outline);
+}
+
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.color-swatch {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.color-swatch.active {
+  transform: scale(1.14);
+  border-color: var(--md-sys-color-on-surface);
+  box-shadow: 0 0 0 3px var(--md-sys-color-primary-container);
+}
+
+.custom-color-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--md-sys-color-surface-container-high);
+}
+
+#accentColorPicker {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primary-btn {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border: none;
+  border-radius: 999px;
+  padding: 14px 20px;
+  font-size: 0.98rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--md-elevation-1);
+}
+
+.primary-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.secondary-btn,
+.ghost-btn {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 999px;
+  padding: 11px 16px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.setup-btn-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.code-editor-details {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--md-sys-color-outline);
+}
+
+.code-editor-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--md-sys-color-primary);
+}
+
+.revision-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.revision-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--md-sys-color-surface);
+  border: 1px solid var(--md-sys-color-outline);
+  font-size: 0.8rem;
+}
+
+/* PLAY VIEW */
+.player-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 18px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  box-shadow: var(--md-elevation-1);
+}
+
+.player-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.player-description {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--md-sys-color-on-surface-variant);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Same geometry as the library cards: even grid, wrapping by breakpoint. */
+.player-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.player-actions > .icon-btn {
+  min-height: 42px;
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* An odd number of actions: the last one absorbs the empty cell. */
+.player-actions.is-odd > .icon-btn:last-child {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 560px) {
+  .player-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Short screens: the player chrome must not eat the game. One row of actions and
+   a single description line keep the frame tall enough for the game's own panel. */
+@media (max-height: 760px) {
+  .app-main {
+    padding: 10px 12px;
+  }
+
+  .player-toolbar {
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+
+  .player-description {
+    -webkit-line-clamp: 1;
+  }
+
+  .player-actions {
+    gap: 6px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .player-actions > .icon-btn {
+    min-height: 36px;
+    padding: 6px 4px;
+    font-size: 0.66rem;
+  }
+
+  /* Three actions in four columns: let the last one absorb the two free cells. */
+  .player-actions.is-odd > .icon-btn:last-child {
+    grid-column: span 2;
+  }
+}
+
+/* Cramped viewports (landscape phones, tiny windows): the game is the screen.
+   The header and the game metadata step aside instead of squeezing the canvas. */
+@media (max-height: 560px) {
+  body.is-playing .app-header {
+    display: none;
+  }
+
+  body.is-playing .app-main {
+    padding: 8px 10px;
+  }
+
+  body.is-playing .player-toolbar {
+    padding: 8px 10px;
+    margin-bottom: 6px;
+  }
+
+  body.is-playing .player-description,
+  body.is-playing #playingMeta {
+    display: none;
+  }
+
+  body.is-playing .player-actions > .icon-btn {
+    min-height: 32px;
+  }
+}
+
+.icon-btn {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.iframe-container {
+  width: 100%;
+  /* Fallback only: app.js measures the real toolbar height and fits the frame
+     above the fixed bottom nav, so the game is never hidden behind it. */
+  height: calc(100dvh - 340px);
+  min-height: 0;
+  background: #090d16;
+  border-radius: 20px;
+  border: 1px solid var(--md-sys-color-outline);
+  overflow: hidden;
+  position: relative;
+  box-shadow: var(--md-elevation-1);
+}
+
+/* Fullscreen owns the whole screen; the inline height measured by app.js is cleared. */
+.iframe-container:fullscreen {
+  height: 100dvh;
+  width: 100vw;
+  border: none;
+  border-radius: 0;
+}
+
+#gameIframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  pointer-events: auto;
+  /* The game owns every gesture: no pan, no zoom, no scroll chaining upward.
+     `manipulation` still let Chrome cancel the pointer stream to scroll the app. */
+  touch-action: none;
+}
+
+/* While playing, the app page must not scroll: a scroll steals the touch
+   gesture from the game and cancels its pointer stream mid-trace. */
+body.is-playing {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* MATERIAL DESIGN 3 BOTTOM NAVIGATION BAR */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--md-sys-color-surface-container);
+  border-top: 1px solid var(--md-sys-color-outline);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  z-index: 30;
+  box-shadow: var(--md-elevation-1);
+}
+
+.nav-tab {
+  background: none;
+  border: none;
+  color: var(--md-sys-color-on-surface-variant);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 30px;
+  border-radius: 999px;
+  transition: background-color 0.18s ease;
+}
+
+.nav-tab.active {
+  color: var(--md-sys-color-on-surface);
+}
+
+.nav-tab.active .nav-pill {
+  background: var(--md-sys-color-primary-container);
+}
+
+.nav-icon {
+  font-size: 1.2rem;
+}
+
+.toast {
+  position: fixed;
+  bottom: calc(var(--nav-height) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  border: 1px solid var(--md-sys-color-primary);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  z-index: 50;
+  box-shadow: var(--md-elevation-2);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Playing gets its own fixed layer instead of living inside the scrolling
+   document. This is the layout fullscreen already produces — the one state where
+   the game reliably receives input — without needing the Fullscreen API. */
+body.is-playing .app-main {
+  padding: 0;
+  max-width: none;
+}
+
+body.is-playing #view-play.active {
+  position: fixed;
+  inset: 0;
+  z-index: 25; /* above the sticky header (20), below the bottom nav (30) */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 10px 8px;
+  background: var(--md-sys-color-surface);
+}

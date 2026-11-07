@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f141c" />
+  <link rel="manifest" href="/manifest.json" />
+  <title>Ludo Game-On-Demand</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-icon">🎲</span>
+      <div>
+        <h1 data-i18n="app.title">Ludo On-Demand</h1>
+        <p id="activeProviderBadge" class="provider-badge">AI: Loading...</p>
+      </div>
+    </div>
+    <button id="quickCreateBtn" class="pill-btn" data-i18n="header.newGame">+ New Game</button>
+  </header>
+
+  <main class="app-main">
+    <!-- 1. LIBRARY VIEW -->
+    <section id="view-library" class="view active" aria-label="Game Library">
+      <div class="section-head">
+        <h2 data-i18n="library.title">Game Library</h2>
+        <input
+          id="searchInput"
+          type="search"
+          placeholder="Search games..."
+          data-i18n-placeholder="library.searchPlaceholder"
+          class="search-input"
+        />
+        <button id="importBtn" type="button" class="secondary-btn hidden" data-i18n="library.importBtn">
+          📥 Import
+        </button>
+        <input
+          id="importFileInput"
+          type="file"
+          accept=".json,.ludogame,application/json"
+          class="hidden"
+        />
+      </div>
+      <div id="libraryGrid" class="library-grid"></div>
+    </section>
+
+    <!-- 2. PROMPT CREATE / MODIFY VIEW -->
+    <section id="view-create" class="view" aria-label="Create or Modify Game">
+      <div class="card">
+        <div class="card-header-row">
+          <h2 id="promptFormTitle" data-i18n="prompt.createTitle">Create a New Game</h2>
+          <button id="resetPromptModeBtn" class="ghost-btn hidden" type="button" data-i18n="prompt.switchNew">
+            Switch to New Game
+          </button>
+        </div>
+        <p id="promptFormSub" class="muted" data-i18n="prompt.createSub">
+          Describe any 2D, board, puzzle, or arcade game. It will be generated with mobile touch + keyboard controls.
+        </p>
+
+        <form id="promptForm" class="stack-form">
+          <input type="hidden" id="editingGameId" value="" />
+
+          <label class="field">
+            <span data-i18n="prompt.gameTitleLabel">Game Title (optional — AI can name it)</span>
+            <input
+              id="gameTitleInput"
+              type="text"
+              placeholder="e.g., Cyber Ludo Royale"
+              data-i18n-placeholder="prompt.gameTitlePlaceholder"
+            />
+          </label>
+
+          <label class="field">
+            <span id="promptLabelText" data-i18n="prompt.questionCreate">What game do you want to create?</span>
+            <textarea
+              id="gamePromptInput"
+              rows="4"
+              required
+              placeholder="e.g., A 4-player Ludo board game with neon visuals, dice roll animation, and AI opponents"
+              data-i18n-placeholder="prompt.questionPlaceholderCreate"
+            ></textarea>
+          </label>
+
+          <div class="preset-chips">
+            <button
+              type="button"
+              class="chip"
+              data-prompt="Classic 4-player Ludo board game with dice roll, token captures, and AI opponents"
+              data-i18n="prompt.chipLudo"
+            >
+              🎲 Ludo Board
+            </button>
+            <button
+              type="button"
+              class="chip"
+              data-prompt="Cyberpunk neon space shooter with laser pulses and asteroid waves"
+              data-i18n="prompt.chipSpace"
+            >
+              🚀 Space Shooter
+            </button>
+            <button
+              type="button"
+              class="chip"
+              data-prompt="4x4 emoji memory card match puzzle with move counter"
+              data-i18n="prompt.chipMemory"
+            >
+              🧠 Memory Match
+            </button>
+          </div>
+
+          <button id="submitPromptBtn" type="submit" class="primary-btn" data-i18n="prompt.generateBtn">
+            ⚡ Generate Game Now
+          </button>
+        </form>
+
+        <!-- Direct Code / HTML Editor Accordion for advanced tweaks -->
+        <!-- Prompt & revision history: visible in edit mode, never in the advanced accordion -->
+        <div id="promptHistoryBlock" class="hidden">
+          <h3 class="block-title" data-i18n="prompt.historyTitle">
+            Prompt &amp; revision history
+          </h3>
+
+          <div class="field">
+            <span data-i18n="prompt.savedPromptLabel">
+              Saved prompt (read-only — copy it to reuse or adapt)
+            </span>
+            <textarea
+              id="savedPromptView"
+              class="prompt-view"
+              rows="3"
+              readonly
+              spellcheck="false"
+            ></textarea>
+            <div class="setup-btn-row">
+              <button type="button" id="copySavedPromptBtn" class="secondary-btn" data-i18n="prompt.copyPromptBtn">
+                📋 Copy prompt
+              </button>
+              <button type="button" id="reuseSavedPromptBtn" class="secondary-btn" data-i18n="prompt.reusePromptBtn">
+                ↩ Use as base for a new edit
+              </button>
+            </div>
+          </div>
+
+          <div id="revisionList" class="revision-list"></div>
+        </div>
+
+        <details id="codeEditorDetails" class="code-editor-details hidden">
+          <summary data-i18n="prompt.advancedCode">Advanced: edit the HTML5 source code</summary>
+          <div class="stack-form" style="margin-top: 12px;">
+            <label class="field">
+              <span data-i18n="prompt.htmlSourceLabel">Self-Contained HTML5 Source</span>
+              <textarea id="rawHtmlInput" rows="8" class="code-textarea"></textarea>
+            </label>
+            <button id="saveRawHtmlBtn" type="button" class="secondary-btn" data-i18n="prompt.saveCodeBtn">
+              💾 Save Code Changes
+            </button>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- 3. PLAY VIEW (SANDBOXED IFRAME) -->
+    <section id="view-play" class="view" aria-label="Play Game">
+      <div class="player-toolbar">
+        <div class="player-head">
+          <strong id="playingTitle">Select a game</strong>
+          <p id="playingDescription" class="player-description"></p>
+          <span id="playingMeta" class="muted-xs"></span>
+        </div>
+        <div class="player-actions">
+          <button id="reloadGameBtn" class="icon-btn" data-i18n="play.restartBtn">↻ Restart</button>
+          <button id="cloneCurrentBtn" class="icon-btn" data-i18n="play.cloneBtn">📋 Clone</button>
+          <button id="modifyCurrentBtn" class="icon-btn" data-i18n="play.editBtn">✏️ Edit</button>
+          <button id="fullscreenGameBtn" class="icon-btn" data-i18n="play.fullscreenBtn">
+            ⛶ Fullscreen
+          </button>
+        </div>
+      </div>
+
+      <div id="iframeContainer" class="iframe-container">
+        <iframe
+          id="gameIframe"
+          title="Playable HTML5 Game Sandbox"
+          sandbox="allow-scripts allow-pointer-lock allow-modals"
+          allow="fullscreen; autoplay"
+        ></iframe>
+      </div>
+    </section>
+
+    <!-- 4. SETUP VIEW (DIVIDED IN NORMAL SETUP & AI SETUP) -->
+    <section id="view-settings" class="view" aria-label="Setup">
+      <div class="setup-stack">
+        <!-- 4A. NORMAL SETUP -->
+        <div id="normalSetupCard" class="card">
+          <h2 data-i18n="setup.normalTitle">Normal Setup</h2>
+          <p class="muted" data-i18n="setup.normalSub">
+            Customize language, dark/light theme, and Material Design accent color.
+          </p>
+
+          <div class="stack-form">
+            <label class="field">
+              <span data-i18n="setup.languageLabel">Language / Idioma</span>
+              <select id="langSelect">
+                <option value="auto" data-i18n="setup.langAuto">Auto (Detect OS / Browser)</option>
+                <option value="en">English (EN)</option>
+                <option value="es">Español (ES)</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span data-i18n="setup.themeLabel">Theme Mode</span>
+              <select id="themeSelect">
+                <option value="auto" data-i18n="setup.themeAuto">Auto (Detect OS / Browser)</option>
+                <option value="dark" data-i18n="setup.themeDark">Dark Mode</option>
+                <option value="light" data-i18n="setup.themeLight">Light Mode</option>
+              </select>
+            </label>
+
+            <div class="field">
+              <span data-i18n="setup.colorLabel">Material Design Color Palette</span>
+              <div class="color-picker-row">
+                <div class="color-swatches" id="colorSwatches">
+                  <button type="button" class="color-swatch" data-color="#00c896" style="background:#00c896;" title="Teal Mint"></button>
+                  <button type="button" class="color-swatch" data-color="#6750a4" style="background:#6750a4;" title="Material Purple"></button>
+                  <button type="button" class="color-swatch" data-color="#0b57d0" style="background:#0b57d0;" title="Ocean Blue"></button>
+                  <button type="button" class="color-swatch" data-color="#e11d48" style="background:#e11d48;" title="Crimson Rose"></button>
+                  <button type="button" class="color-swatch" data-color="#d97706" style="background:#d97706;" title="Amber Gold"></button>
+                  <button type="button" class="color-swatch" data-color="#16a34a" style="background:#16a34a;" title="Emerald"></button>
+                </div>
+                <label class="custom-color-wrap" title="Custom Color Picker">
+                  <input id="accentColorPicker" type="color" value="#00c896" />
+                  <span id="accentColorHex" class="muted-xs">#00c896</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="field">
+              <span data-i18n="setup.creatorTokenLabel">My Creator Key (Stored only in this browser)</span>
+              <div class="setup-btn-row">
+                <input id="creatorTokenInput" type="text" style="flex:1;" autocomplete="off" />
+                <button id="copyCreatorTokenBtn" type="button" class="secondary-btn" data-i18n="setup.copyBtn">
+                  📋 Copy
+                </button>
+              </div>
+              <span class="muted-xs" data-i18n="setup.creatorTokenHint">
+                Identifies games you created so only you (or Admin) can edit or delete them.
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4B. AI SETUP -->
+        <div id="aiSetupCard" class="card">
+          <h2 data-i18n="setup.aiTitle">AI Setup</h2>
+          <p class="muted" data-i18n="setup.aiSub">
+            Use a local LLM (Ollama, LM Studio), any cloud API (OpenAI, Anthropic, Gemini, OpenRouter), or the Built-in Instant Generator.
+          </p>
+
+          <form id="settingsForm" class="stack-form" autocomplete="off">
+            <label class="field">
+              <span data-i18n="setup.providerLabel">Provider</span>
+              <select id="providerSelect">
+                <option value="ollama">Ollama (Local - http://localhost:11434/v1)</option>
+                <option value="lmstudio">LM Studio (Local - http://localhost:1234/v1)</option>
+                <option value="openai">OpenAI API</option>
+                <option value="anthropic">Anthropic Claude API</option>
+                <option value="gemini">Google Gemini API</option>
+                <option value="openrouter">OpenRouter API</option>
+                <option value="openai-compatible">Custom OpenAI-Compatible Endpoint</option>
+                <option value="opencode-go">OpenCode Go (subscription)</option>
+                <option value="template">Built-in Instant Generator (Offline / No API Key)</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span data-i18n="setup.baseUrlLabel">API Base URL</span>
+              <input id="baseUrlInput" type="url" placeholder="http://localhost:11434/v1" />
+            </label>
+
+            <label class="field">
+              <span data-i18n="setup.modelLabel">Model Name</span>
+              <div class="setup-btn-row">
+                <select id="modelSelect" style="flex:1;"></select>
+                <button
+                  id="loadModelsBtn"
+                  type="button"
+                  class="secondary-btn"
+                  data-i18n="setup.loadModelsBtn"
+                  title="Fetch available models from the provider"
+                >
+                  🔄 Load
+                </button>
+              </div>
+              <input
+                id="modelInput"
+                type="text"
+                placeholder="qwen2.5-coder:7b"
+                class="hidden"
+                autocomplete="off"
+              />
+              <span id="modelHint" class="muted-xs"></span>
+            </label>
+
+            <label class="field">
+              <span data-i18n="setup.apiKeyLabel">API Key (leave empty for local Ollama / LM Studio)</span>
+              <input
+                id="apiKeyInput"
+                type="password"
+                placeholder="sk-..."
+                autocomplete="new-password"
+                autocapitalize="none"
+                spellcheck="false"
+                data-1p-ignore="true"
+                data-lpignore="true"
+                data-form-type="other"
+              />
+            </label>
+
+            <label class="checkbox-field">
+              <input id="fallbackToggle" type="checkbox" checked />
+              <span data-i18n="setup.fallbackLabel">Auto-fallback to Built-in Instant Generator if AI server is offline</span>
+            </label>
+
+            <div class="setup-btn-row">
+              <button type="submit" class="primary-btn" style="flex:1;" data-i18n="setup.saveBtn">
+                💾 Save Settings
+              </button>
+              <button id="testProviderBtn" type="button" class="secondary-btn" data-i18n="setup.testBtn">
+                🔌 Test Connection
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. DEDICATED /ADMIN VIEW (ONLY ACCESSIBLE VIA /admin URL) -->
+    <section id="view-admin" class="view" aria-label="Admin Portal">
+      <div class="card">
+        <div class="card-header-row">
+          <h2 data-i18n="admin.title">🔐 Admin Portal</h2>
+          <span id="adminStatusBadge" class="muted-xs"></span>
+        </div>
+        <p class="muted" data-i18n="admin.sub">
+          Enter the server Admin Passkey to unlock editing and deletion for all games across the platform.
+        </p>
+
+        <form id="adminPortalForm" class="stack-form" autocomplete="off">
+          <label class="field">
+            <span data-i18n="setup.adminKeyLabel">Admin Access Key</span>
+            <input
+              id="adminPortalKeyInput"
+              type="password"
+              autocomplete="new-password"
+              autocapitalize="none"
+              spellcheck="false"
+              data-1p-ignore="true"
+              data-lpignore="true"
+              data-form-type="other"
+              placeholder="Enter admin passkey..."
+              data-i18n-placeholder="setup.adminKeyPlaceholder"
+              autocomplete="off"
+              required
+            />
+          </label>
+
+          <div class="setup-btn-row">
+            <button id="verifyAdminBtn" type="submit" class="primary-btn" style="flex:1;" data-i18n="admin.unlockBtn">
+              🔑 Unlock Admin & Continue
+            </button>
+            <button id="logoutAdminBtn" type="button" class="secondary-btn" data-i18n="admin.logoutBtn">
+              🚪 Exit Admin Mode
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <!-- MOBILE-FIRST MATERIAL 3 BOTTOM NAVIGATION -->
+  <nav class="bottom-nav" aria-label="Primary Navigation">
+    <button class="nav-tab active" data-target="view-library">
+      <span class="nav-pill"><span class="nav-icon">📚</span></span>
+      <span class="nav-label" data-i18n="nav.library">Library</span>
+    </button>
+    <button class="nav-tab" data-target="view-create">
+      <span class="nav-pill"><span class="nav-icon">✨</span></span>
+      <span class="nav-label" data-i18n="nav.prompt">Prompt</span>
+    </button>
+    <button class="nav-tab" data-target="view-play">
+      <span class="nav-pill"><span class="nav-icon">🎮</span></span>
+      <span class="nav-label" data-i18n="nav.play">Play</span>
+    </button>
+    <button class="nav-tab" data-target="view-settings">
+      <span class="nav-pill"><span class="nav-icon">⚙️</span></span>
+      <span class="nav-label" data-i18n="nav.setup">Setup</span>
+    </button>
+  </nav>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
