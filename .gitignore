@@ -10,3 +10,4 @@ drafts/
 .engram/*
 !.engram/config.json
 odd/
+data/previews/
