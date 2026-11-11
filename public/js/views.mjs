@@ -3,7 +3,7 @@ import { t, getEffectiveLang, applyThemeAndColors } from "./theme.mjs";
 import { saveLocalBrowserSettings, generateRandomCreatorToken } from "./storage.mjs";
 import { api } from "./api.mjs";
 import { showToast, gameIdFromPath, gamePath, switchView } from "./navigation.mjs";
-import { mountGameIframe, schedulePlayerFrameHeight } from "./player.mjs";
+import { mountGameIframe, schedulePlayerFrameHeight, requestFrameCapture } from "./player.mjs";
 import { CUSTOM_MODEL, renderProviderBadge, syncModelFields, renderModelOptions, getSelectedModel, setModelHint, renderModelHint } from "./settings.mjs";
 
 let els = null;
@@ -73,12 +73,14 @@ export function updatePlayerToolbarState() {
       count: revCount,
     })}`;
     els.modifyCurrentBtn.classList.toggle("hidden", !state.currentGame.canEdit);
+    els.setPreviewBtn.classList.toggle("hidden", !state.currentGame.canEdit);
     syncPlayerActionLayout();
     renderRevisions(state.currentGame);
   } else {
     els.playingTitle.textContent = t("play.selectGame");
     els.playingDescription.textContent = "";
     els.modifyCurrentBtn.classList.add("hidden");
+    els.setPreviewBtn.classList.add("hidden");
     syncPlayerActionLayout();
   }
   schedulePlayerFrameHeight();
@@ -116,33 +118,37 @@ export function renderLibrary() {
       : t("library.ownerShared");
 
     card.innerHTML = `
-      <div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <h3></h3>
-          <span class="muted-xs" style="padding:2px 8px;border-radius:999px;border:1px solid var(--md-sys-color-outline);white-space:nowrap;">${badgeLabel}</span>
+      <div class="game-card-media"></div>
+      <div class="game-card-body">
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <h3></h3>
+            <span class="muted-xs" style="padding:2px 8px;border-radius:999px;border:1px solid var(--md-sys-color-outline);white-space:nowrap;">${badgeLabel}</span>
+          </div>
+          <p class="game-prompt-preview"></p>
         </div>
-        <p class="game-prompt-preview"></p>
-      </div>
-      <div>
-        <div class="game-meta" style="margin-bottom: 10px;">
-          <span>${t("library.model")}: ${game.provider || "local"}</span>
-          <span>v${revCount}</span>
-        </div>
-        <div class="card-actions">
-          <button class="btn-play" type="button">${t("library.playBtn")}</button>
-          <button class="btn-edit btn-clone" type="button">${t("library.cloneBtn")}</button>
-          <button class="btn-export" type="button" title="${t("library.exportBtn")}">⬇</button>
-          ${
-            game.canEdit
-              ? `<button class="btn-edit btn-modify" type="button">${t("library.editBtn")}</button>
-                 <button class="btn-delete" type="button" title="${t("library.deleteTitle")}">🗑️</button>`
-              : ""
-          }
+        <div>
+          <div class="game-meta" style="margin-bottom: 10px;">
+            <span>${t("library.model")}: ${game.provider || "local"}</span>
+            <span>v${revCount}</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-play" type="button">${t("library.playBtn")}</button>
+            <button class="btn-edit btn-clone" type="button">${t("library.cloneBtn")}</button>
+            <button class="btn-export" type="button" title="${t("library.exportBtn")}">⬇</button>
+            ${
+              game.canEdit
+                ? `<button class="btn-edit btn-modify" type="button">${t("library.editBtn")}</button>
+                   <button class="btn-delete" type="button" title="${t("library.deleteTitle")}">🗑️</button>`
+                : ""
+            }
+          </div>
         </div>
       </div>
     `;
     card.querySelector("h3").textContent = game.title;
     card.querySelector(".game-prompt-preview").textContent = game.prompt;
+    renderCardPreview(card, game);
 
     card.querySelector(".btn-play").addEventListener("click", () => openGameInNewTab(game));
     card.querySelector(".btn-clone").addEventListener("click", () => handleCloneGame(game));
@@ -161,6 +167,114 @@ export function renderLibrary() {
     }
 
     els.libraryGrid.appendChild(card);
+  });
+}
+
+function renderCardPreview(card, game) {
+  const media = card.querySelector(".game-card-media");
+  if (!media) return;
+  media.dataset.initial = (game.title.trim()[0] || "★").toUpperCase();
+
+  // The thumbnail opens the in-app player, which is where the owner pins the
+  // frame that represents the game. "Play" keeps its own-tab behaviour.
+  const openInApp = () => openGameInPlayer(game);
+  media.setAttribute("role", "button");
+  media.tabIndex = 0;
+  media.title = t("library.previewOpen");
+  media.addEventListener("click", openInApp);
+  media.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openInApp();
+    }
+  });
+
+  if (game.previewUrl) {
+    const img = document.createElement("img");
+    img.className = "game-preview";
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.alt = t("library.previewAlt", { title: game.title });
+    img.src = game.previewUrl;
+    img.addEventListener("error", () => {
+      img.remove();
+      media.classList.add("is-empty");
+    });
+    media.appendChild(img);
+  } else {
+    media.classList.add("is-empty");
+  }
+
+  if (game.previewStale && game.canEdit) {
+    const stale = document.createElement("span");
+    stale.className = "game-preview-stale";
+    stale.textContent = t("library.previewStale");
+    media.appendChild(stale);
+  }
+}
+
+// Capture the frame the author is looking at, not a guessed moment.
+export async function handleSetPreview() {
+  const game = state.currentGame;
+  if (!game) return;
+  const shot = await requestFrameCapture(els.gameIframe);
+  if (!shot) {
+    showToast(t("library.previewCaptureFailed"), 6000);
+    els.previewFileInput.click();
+    return;
+  }
+  await saveGamePreview(game, shot);
+}
+
+export async function handlePreviewFile(file) {
+  const game = state.currentGame;
+  if (!file || !game) return;
+  try {
+    await saveGamePreview(game, await downscaleImage(file, 720, 1280));
+  } catch {
+    showToast(t("library.previewInvalidToast"), 6000);
+  }
+}
+
+async function saveGamePreview(game, dataUrl) {
+  try {
+    await api(state, `/api/games/${game.id}/preview`, {
+      method: "POST",
+      body: JSON.stringify({ image: dataUrl }),
+    });
+    await refreshGames(game.id);
+    showToast(t("library.previewSavedToast"), 4000);
+  } catch (err) {
+    showToast(err.message, 6000);
+  }
+}
+
+// Keeps uploads bounded without an image library on the server.
+function downscaleImage(file, maxWidth, maxHeight) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/webp", 0.72));
+      } catch (err) {
+        reject(err);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("image decode failed"));
+    };
+    img.src = url;
   });
 }
 
@@ -532,6 +646,14 @@ export function wireEvents() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (file) await handleImportFile(file);
+  });
+
+  els.setPreviewBtn.addEventListener("click", () => handleSetPreview());
+
+  els.previewFileInput.addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) await handlePreviewFile(file);
   });
 
   els.resetPromptModeBtn.addEventListener("click", () => setCreateMode());

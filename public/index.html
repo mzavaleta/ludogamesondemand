@@ -41,6 +41,12 @@
           accept=".json,.ludogame,application/json"
           class="hidden"
         />
+        <input
+          id="previewFileInput"
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          class="hidden"
+        />
       </div>
       <div id="libraryGrid" class="library-grid"></div>
     </section>
@@ -172,6 +178,9 @@
           <button id="reloadGameBtn" class="icon-btn" data-i18n="play.restartBtn">↻ Restart</button>
           <button id="cloneCurrentBtn" class="icon-btn" data-i18n="play.cloneBtn">📋 Clone</button>
           <button id="modifyCurrentBtn" class="icon-btn" data-i18n="play.editBtn">✏️ Edit</button>
+          <button id="setPreviewBtn" class="icon-btn hidden" data-i18n="play.setPreviewBtn">
+            📸 Preview
+          </button>
           <button id="fullscreenGameBtn" class="icon-btn" data-i18n="play.fullscreenBtn">
             ⛶ Fullscreen
           </button>
