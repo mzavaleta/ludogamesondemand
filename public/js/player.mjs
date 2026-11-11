@@ -46,6 +46,38 @@ export function focusGameIframe() {
   } catch {}
 }
 
+// Asks the running game for one frame over postMessage. The game document is
+// sandboxed without allow-same-origin, so this is the only channel available —
+// and the only one we want, since it keeps untrusted HTML away from the app DOM.
+export function requestFrameCapture(iframe, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const target = iframe?.contentWindow;
+    if (!target) return resolve(null);
+
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+      resolve(value);
+    };
+    const onMessage = (event) => {
+      if (event.source !== target) return;
+      const data = event.data;
+      if (!data || data.type !== "ludo:capture-result") return;
+      finish(typeof data.data === "string" && data.data.startsWith("data:image/") ? data.data : null);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+
+    window.addEventListener("message", onMessage);
+    try {
+      target.postMessage({ type: "ludo:capture-request" }, "*");
+    } catch {
+      finish(null);
+    }
+  });
+}
 export function onGameFrameLoad() {
   focusGameIframe();
   if (els.playView && els.playView.classList.contains("active")) {

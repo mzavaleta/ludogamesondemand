@@ -4,6 +4,7 @@ import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { createGameStore, hashCreatorToken } from "./store.mjs";
+import { createPreviewStore } from "./previews.mjs";
 import {
   PROVIDER_PRESETS,
   buildDynamicTemplateGame,
@@ -67,6 +68,219 @@ const MODEL_LIST_TIMEOUT_MS = 6000;
 const IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 const ENVELOPE_FORMAT = "ludogame";
 const ENVELOPE_VERSION = 1;
+
+// Injected into every served game so the parent app can ask it for one frame
+// over postMessage. It runs inside the sandboxed document (opaque origin), so it
+// can read its own canvas/SVG while the app still cannot touch the game DOM.
+const CAPTURE_HELPER = `<script data-ludo-capture="1">
+(function () {
+  if (window.__ludoCaptureInstalled) return;
+  window.__ludoCaptureInstalled = true;
+
+  function cssText() {
+    var out = [];
+    try {
+      for (var i = 0; i < document.styleSheets.length; i++) {
+        var rules = null;
+        try { rules = document.styleSheets[i].cssRules; } catch (e) { rules = null; }
+        if (!rules) continue;
+        for (var j = 0; j < rules.length; j++) out.push(rules[j].cssText);
+      }
+    } catch (e) {}
+    return out.join("\\n");
+  }
+
+  function biggest(tag) {
+    var best = null, area = 0;
+    var nodes = document.getElementsByTagName(tag);
+    for (var i = 0; i < nodes.length; i++) {
+      var r = nodes[i].getBoundingClientRect();
+      var a = r.width * r.height;
+      if (a > area) { area = a; best = nodes[i]; }
+    }
+    return best;
+  }
+
+  function pageBackground() {
+    try {
+      var bg = window.getComputedStyle(document.body).backgroundColor;
+      if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") return bg;
+    } catch (e) {}
+    return "#070a14";
+  }
+
+  // Lossy WebP mangles a transparent alpha channel into grey blocks, so every
+  // capture is composited over the game's own background first.
+  function canvasDataUrl(canvas) {
+    var w = canvas.width || Math.round(canvas.getBoundingClientRect().width);
+    var h = canvas.height || Math.round(canvas.getBoundingClientRect().height);
+    if (!w || !h) return null;
+    var c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = pageBackground();
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(canvas, 0, 0, w, h);
+    return c.toDataURL("image/webp", 0.75);
+  }
+
+  function isFlat(dataUrl) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var c = document.createElement("canvas");
+          c.width = 24;
+          c.height = 24;
+          var ctx = c.getContext("2d");
+          ctx.drawImage(img, 0, 0, 24, 24);
+          var px = ctx.getImageData(0, 0, 24, 24).data;
+          var r0 = px[0], g0 = px[1], b0 = px[2], a0 = px[3];
+          for (var i = 4; i < px.length; i += 4) {
+            if (Math.abs(px[i] - r0) > 6 || Math.abs(px[i + 1] - g0) > 6 ||
+                Math.abs(px[i + 2] - b0) > 6 || Math.abs(px[i + 3] - a0) > 6) {
+              return resolve(false);
+            }
+          }
+          resolve(true);
+        } catch (e) { resolve(true); }
+      };
+      img.onerror = function () { resolve(true); };
+      img.src = dataUrl;
+    });
+  }
+
+  // Rasterizes an SVG string; resolves null when the browser refuses to load it.
+  function rasterize(svgText, width, height, canvasOverlay) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var c = document.createElement("canvas");
+          c.width = width;
+          c.height = height;
+          var ctx = c.getContext("2d");
+          ctx.fillStyle = pageBackground();
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          // Canvas bitmaps are not part of a DOM serialization, so paint the
+          // live ones back on top of the rendered shell.
+          if (canvasOverlay) {
+            var nodes = document.getElementsByTagName("canvas");
+            for (var i = 0; i < nodes.length; i++) {
+              var rect = nodes[i].getBoundingClientRect();
+              if (rect.width < 2 || rect.height < 2) continue;
+              try { ctx.drawImage(nodes[i], rect.left, rect.top, rect.width, rect.height); } catch (e) {}
+            }
+          }
+          resolve(c.toDataURL("image/webp", 0.75));
+        } catch (e) { resolve(null); }
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgText);
+    });
+  }
+
+  function svgToDataUrl(svg) {
+    var rect = svg.getBoundingClientRect();
+    var w = Math.max(1, Math.round(rect.width || svg.clientWidth || 360));
+    var h = Math.max(1, Math.round(rect.height || svg.clientHeight || 640));
+    var clone = svg.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", String(w));
+    clone.setAttribute("height", String(h));
+    var style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    style.textContent = cssText();
+    clone.insertBefore(style, clone.firstChild);
+    return rasterize(new XMLSerializer().serializeToString(clone), w, h, false);
+  }
+
+  // Last resort for games that draw with plain DOM: serialize the page into a
+  // foreignObject, inline the rules, and rasterize it.
+  function domToDataUrl(stripImages) {
+    var w = Math.max(1, Math.round(window.innerWidth));
+    var h = Math.max(1, Math.round(window.innerHeight));
+    var clone = document.documentElement.cloneNode(true);
+    var drop = clone.querySelectorAll("script, link, style");
+    for (var i = 0; i < drop.length; i++) drop[i].parentNode.removeChild(drop[i]);
+    if (stripImages) {
+      var imgs = clone.querySelectorAll("img");
+      for (var k = 0; k < imgs.length; k++) imgs[k].parentNode.removeChild(imgs[k]);
+    }
+    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    var head = clone.querySelector("head");
+    var style = document.createElement("style");
+    style.textContent = cssText();
+    if (head) head.appendChild(style);
+    else clone.insertBefore(style, clone.firstChild);
+    var inner = new XMLSerializer().serializeToString(clone);
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">' +
+      '<foreignObject x="0" y="0" width="100%" height="100%">' + inner + "</foreignObject></svg>";
+    return rasterize(svg, w, h, true);
+  }
+
+  function grab() {
+    var canvas = biggest("canvas");
+    var svg = biggest("svg");
+    var viewport = Math.max(1, window.innerWidth * window.innerHeight);
+    var canvasArea = 0;
+    if (canvas) {
+      var rect = canvas.getBoundingClientRect();
+      canvasArea = rect.width * rect.height;
+    }
+
+    var chain = Promise.resolve(null);
+
+    // A canvas that owns the screen is the game itself.
+    if (canvas && canvasArea >= viewport * 0.4) {
+      chain = chain.then(function (prev) {
+        if (prev) return prev;
+        var shot = null;
+        try { shot = canvasDataUrl(canvas); } catch (e) {}
+        if (!shot) return null;
+        return isFlat(shot).then(function (flat) { return flat ? null : shot; });
+      });
+    }
+    // Vector games reproduce exactly as vectors.
+    if (svg) {
+      chain = chain.then(function (prev) { return prev ? prev : svgToDataUrl(svg); });
+    }
+    // Everything else: the DOM shell, with live canvases painted back in.
+    chain = chain.then(function (prev) {
+      if (prev) return prev;
+      return domToDataUrl(false).then(function (shot) {
+        if (shot) return shot;
+        return domToDataUrl(true);
+      });
+    });
+    chain = chain.then(function (shot) {
+      if (!shot) return null;
+      return isFlat(shot).then(function (flat) { return flat ? null : shot; });
+    });
+    return chain;
+  }
+
+  window.addEventListener("message", function (event) {
+    var data = event.data;
+    if (!data || data.type !== "ludo:capture-request") return;
+    grab().then(function (shot) {
+      try {
+        event.source.postMessage({ type: "ludo:capture-result", data: shot || null }, "*");
+      } catch (e) {}
+    });
+  });
+})();
+</script>`;
+
+/** @param {string} html @returns {string} */
+function withCaptureHelper(html) {
+  if (!html || html.includes('data-ludo-capture="1"')) return html;
+  const idx = html.toLowerCase().lastIndexOf("</body>");
+  if (idx === -1) return `${html}${CAPTURE_HELPER}`;
+  return `${html.slice(0, idx)}${CAPTURE_HELPER}${html.slice(idx)}`;
+}
 
 /** @param {any} title @returns {string} */
 function slugify(title) {
@@ -190,6 +404,20 @@ export function createAppServer({
   logger = console,
 } = {}) {
   const store = createGameStore(dbPath);
+  const previews = createPreviewStore(dbPath);
+
+  /** @param {any} game @returns {any} */
+  function withPreviewMeta(game) {
+    const info = previews.stat(game.id);
+    if (!info) return { ...game, previewUrl: null, previewStale: false };
+    const latestRevision = Array.isArray(game.revisions) ? game.revisions[0] : null;
+    const served = Date.parse(latestRevision?.created_at || "");
+    return {
+      ...game,
+      previewUrl: `/api/games/${game.id}/preview?v=${info.version}`,
+      previewStale: Number.isFinite(served) ? info.mtimeMs < served : false,
+    };
+  }
 
   /**
    * Prints a provider failure to the server console as a single copy-pasteable line.
@@ -388,7 +616,7 @@ export function createAppServer({
             "base-uri 'none'",
           ].join("; "),
         });
-        return res.end(game.html);
+        return res.end(withCaptureHelper(game.html));
       }
 
       // Public static presets catalog ONLY — personal AI settings/keys NEVER live on the server
@@ -491,7 +719,7 @@ export function createAppServer({
       // List all games (includes per-caller canEdit / isOwner flags)
       if (pathname === "/api/games" && method === "GET") {
         return sendJson(res, 200, {
-          games: store.listGames(auth),
+          games: store.listGames(auth).map(withPreviewMeta),
           isAdmin: auth.isAdmin,
         });
       }
@@ -610,6 +838,24 @@ export function createAppServer({
           return sendJson(res, 201, { game: cloned });
         }
 
+        // Preview is public: the library already shows it to everyone.
+        if (subAction === "preview" && method === "GET") {
+          const found = previews.read(gameId);
+          if (!found) return sendJson(res, 404, { error: "Preview not found." });
+          if (req.headers["if-none-match"] === found.etag) {
+            res.writeHead(304, { ETag: found.etag });
+            return res.end();
+          }
+          res.writeHead(200, {
+            "Content-Type": found.type,
+            "Content-Length": found.body.length,
+            "Cache-Control": "public, max-age=31536000, immutable",
+            ETag: found.etag,
+            "X-Content-Type-Options": "nosniff",
+          });
+          return res.end(found.body);
+        }
+
         if (subAction === "export" && method === "GET") {
           // Export is available to everyone: the game HTML is already public via GET /play/:id.
           const game = store.getGame(gameId, auth);
@@ -651,7 +897,20 @@ export function createAppServer({
 
         if (!subAction && method === "DELETE") {
           store.deleteGame(gameId);
+          previews.remove(gameId);
           return sendJson(res, 200, { deleted: true, id: gameId });
+        }
+
+        // The owner or an admin pins the frame that represents this game.
+        if (subAction === "preview" && method === "POST") {
+          const body = await readJsonBody(req);
+          const saved = previews.save(gameId, body.image);
+          if (!saved.ok) return sendJson(res, 400, { error: saved.error });
+          const info = previews.stat(gameId);
+          return sendJson(res, 200, {
+            previewUrl: `/api/games/${gameId}/preview?v=${info?.version || Date.now()}`,
+            previewStale: false,
+          });
         }
 
         if (subAction === "modify" && method === "POST") {
