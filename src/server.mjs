@@ -101,6 +101,30 @@ const CAPTURE_HELPER = `<script data-ludo-capture="1">
     return best;
   }
 
+  function pageBackground() {
+    try {
+      var bg = window.getComputedStyle(document.body).backgroundColor;
+      if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") return bg;
+    } catch (e) {}
+    return "#070a14";
+  }
+
+  // Lossy WebP mangles a transparent alpha channel into grey blocks, so every
+  // capture is composited over the game's own background first.
+  function canvasDataUrl(canvas) {
+    var w = canvas.width || Math.round(canvas.getBoundingClientRect().width);
+    var h = canvas.height || Math.round(canvas.getBoundingClientRect().height);
+    if (!w || !h) return null;
+    var c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = pageBackground();
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(canvas, 0, 0, w, h);
+    return c.toDataURL("image/webp", 0.75);
+  }
+
   function isFlat(dataUrl) {
     return new Promise(function (resolve) {
       var img = new Image();
@@ -127,47 +151,115 @@ const CAPTURE_HELPER = `<script data-ludo-capture="1">
     });
   }
 
-  function svgToDataUrl(svg) {
+  // Rasterizes an SVG string; resolves null when the browser refuses to load it.
+  function rasterize(svgText, width, height, canvasOverlay) {
     return new Promise(function (resolve) {
-      try {
-        var rect = svg.getBoundingClientRect();
-        var w = Math.max(1, Math.round(rect.width || svg.clientWidth || 360));
-        var h = Math.max(1, Math.round(rect.height || svg.clientHeight || 640));
-        var clone = svg.cloneNode(true);
-        clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-        clone.setAttribute("width", String(w));
-        clone.setAttribute("height", String(h));
-        var style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-        style.textContent = cssText();
-        clone.insertBefore(style, clone.firstChild);
-        var xml = new XMLSerializer().serializeToString(clone);
-        var img = new Image();
-        img.onload = function () {
-          try {
-            var c = document.createElement("canvas");
-            c.width = w;
-            c.height = h;
-            c.getContext("2d").drawImage(img, 0, 0, w, h);
-            resolve(c.toDataURL("image/webp", 0.72));
-          } catch (e) { resolve(null); }
-        };
-        img.onerror = function () { resolve(null); };
-        img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
-      } catch (e) { resolve(null); }
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var c = document.createElement("canvas");
+          c.width = width;
+          c.height = height;
+          var ctx = c.getContext("2d");
+          ctx.fillStyle = pageBackground();
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          // Canvas bitmaps are not part of a DOM serialization, so paint the
+          // live ones back on top of the rendered shell.
+          if (canvasOverlay) {
+            var nodes = document.getElementsByTagName("canvas");
+            for (var i = 0; i < nodes.length; i++) {
+              var rect = nodes[i].getBoundingClientRect();
+              if (rect.width < 2 || rect.height < 2) continue;
+              try { ctx.drawImage(nodes[i], rect.left, rect.top, rect.width, rect.height); } catch (e) {}
+            }
+          }
+          resolve(c.toDataURL("image/webp", 0.75));
+        } catch (e) { resolve(null); }
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgText);
     });
+  }
+
+  function svgToDataUrl(svg) {
+    var rect = svg.getBoundingClientRect();
+    var w = Math.max(1, Math.round(rect.width || svg.clientWidth || 360));
+    var h = Math.max(1, Math.round(rect.height || svg.clientHeight || 640));
+    var clone = svg.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", String(w));
+    clone.setAttribute("height", String(h));
+    var style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    style.textContent = cssText();
+    clone.insertBefore(style, clone.firstChild);
+    return rasterize(new XMLSerializer().serializeToString(clone), w, h, false);
+  }
+
+  // Last resort for games that draw with plain DOM: serialize the page into a
+  // foreignObject, inline the rules, and rasterize it.
+  function domToDataUrl(stripImages) {
+    var w = Math.max(1, Math.round(window.innerWidth));
+    var h = Math.max(1, Math.round(window.innerHeight));
+    var clone = document.documentElement.cloneNode(true);
+    var drop = clone.querySelectorAll("script, link, style");
+    for (var i = 0; i < drop.length; i++) drop[i].parentNode.removeChild(drop[i]);
+    if (stripImages) {
+      var imgs = clone.querySelectorAll("img");
+      for (var k = 0; k < imgs.length; k++) imgs[k].parentNode.removeChild(imgs[k]);
+    }
+    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    var head = clone.querySelector("head");
+    var style = document.createElement("style");
+    style.textContent = cssText();
+    if (head) head.appendChild(style);
+    else clone.insertBefore(style, clone.firstChild);
+    var inner = new XMLSerializer().serializeToString(clone);
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">' +
+      '<foreignObject x="0" y="0" width="100%" height="100%">' + inner + "</foreignObject></svg>";
+    return rasterize(svg, w, h, true);
   }
 
   function grab() {
     var canvas = biggest("canvas");
-    if (canvas) {
-      try {
-        var shot = canvas.toDataURL("image/webp", 0.72);
-        if (shot) return isFlat(shot).then(function (flat) { return flat ? null : shot; });
-      } catch (e) {}
-    }
     var svg = biggest("svg");
-    if (svg) return svgToDataUrl(svg);
-    return Promise.resolve(null);
+    var viewport = Math.max(1, window.innerWidth * window.innerHeight);
+    var canvasArea = 0;
+    if (canvas) {
+      var rect = canvas.getBoundingClientRect();
+      canvasArea = rect.width * rect.height;
+    }
+
+    var chain = Promise.resolve(null);
+
+    // A canvas that owns the screen is the game itself.
+    if (canvas && canvasArea >= viewport * 0.4) {
+      chain = chain.then(function (prev) {
+        if (prev) return prev;
+        var shot = null;
+        try { shot = canvasDataUrl(canvas); } catch (e) {}
+        if (!shot) return null;
+        return isFlat(shot).then(function (flat) { return flat ? null : shot; });
+      });
+    }
+    // Vector games reproduce exactly as vectors.
+    if (svg) {
+      chain = chain.then(function (prev) { return prev ? prev : svgToDataUrl(svg); });
+    }
+    // Everything else: the DOM shell, with live canvases painted back in.
+    chain = chain.then(function (prev) {
+      if (prev) return prev;
+      return domToDataUrl(false).then(function (shot) {
+        if (shot) return shot;
+        return domToDataUrl(true);
+      });
+    });
+    chain = chain.then(function (shot) {
+      if (!shot) return null;
+      return isFlat(shot).then(function (flat) { return flat ? null : shot; });
+    });
+    return chain;
   }
 
   window.addEventListener("message", function (event) {
