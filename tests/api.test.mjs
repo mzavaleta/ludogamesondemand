@@ -481,3 +481,159 @@ test("POST /api/models lists provider models without ever echoing credentials", 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("game previews: authored capture, immutable serving, staleness and cleanup", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ludo-preview-"));
+  const dbPath = join(dir, "preview.db");
+  const adminKey = "preview-admin-key";
+  const { server, store } = createAppServer({ dbPath, adminKey });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const owner = { "Content-Type": "application/json", "X-Creator-Token": "preview-owner" };
+  const stranger = { "Content-Type": "application/json", "X-Creator-Token": "preview-stranger" };
+
+  // The server never decodes pixels, so container magic bytes are the contract.
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  const pngDataUrl = `data:image/png;base64,${png.toString("base64")}`;
+
+  try {
+    const createRes = await fetch(`${base}/api/games`, {
+      method: "POST",
+      headers: { ...owner, "X-Admin-Key": adminKey },
+      body: JSON.stringify({
+        title: "Preview Target",
+        prompt: "capture me",
+        html: "<!DOCTYPE html><html><body><canvas id='c' width='10' height='10'></canvas></body></html>",
+      }),
+    });
+    assert.equal(createRes.status, 201);
+    const { game } = await createRes.json();
+
+    // Nothing authored yet, and the list says so without inventing a URL.
+    const emptyGet = await fetch(`${base}/api/games/${game.id}/preview`);
+    assert.equal(emptyGet.status, 404);
+    let list = await (await fetch(`${base}/api/games`, { headers: owner })).json();
+    assert.equal(list.games.find((g) => g.id === game.id).previewUrl, null);
+
+    // Only the owner or an admin may pin a preview.
+    const strangerRes = await fetch(`${base}/api/games/${game.id}/preview`, {
+      method: "POST",
+      headers: stranger,
+      body: JSON.stringify({ image: pngDataUrl }),
+    });
+    assert.equal(strangerRes.status, 403);
+
+    // Rejects missing/non-image/SVG payloads.
+    for (const image of [undefined, "not-an-image", "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="]) {
+      const badRes = await fetch(`${base}/api/games/${game.id}/preview`, {
+        method: "POST",
+        headers: owner,
+        body: JSON.stringify({ image }),
+      });
+      assert.equal(badRes.status, 400, `payload ${String(image)} must be rejected`);
+    }
+
+    const saveRes = await fetch(`${base}/api/games/${game.id}/preview`, {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ image: pngDataUrl }),
+    });
+    assert.equal(saveRes.status, 200);
+    const saved = await saveRes.json();
+    assert.match(saved.previewUrl, /^\/api\/games\/[^/]+\/preview\?v=\d+$/);
+
+    // Served with an immutable cache and the declared type, byte for byte.
+    const shot = await fetch(`${base}${saved.previewUrl}`);
+    assert.equal(shot.status, 200);
+    assert.equal(shot.headers.get("content-type"), "image/png");
+    assert.match(shot.headers.get("cache-control"), /immutable/);
+    assert.equal(shot.headers.get("x-content-type-options"), "nosniff");
+    const body = Buffer.from(await shot.arrayBuffer());
+    assert.deepEqual(body, png);
+
+    const etag = shot.headers.get("etag");
+    assert.ok(etag);
+    const cached = await fetch(`${base}${saved.previewUrl}`, {
+      headers: { "If-None-Match": etag },
+    });
+    assert.equal(cached.status, 304);
+
+    // The list exposes it and reports it as current.
+    list = await (await fetch(`${base}/api/games`, { headers: owner })).json();
+    let listed = list.games.find((g) => g.id === game.id);
+    assert.equal(listed.previewUrl, saved.previewUrl);
+    assert.equal(listed.previewStale, false);
+
+    // A new revision makes the shot stale instead of silently out of date.
+    await new Promise((r) => setTimeout(r, 20));
+    const editRes = await fetch(`${base}/api/games/${game.id}`, {
+      method: "PUT",
+      headers: owner,
+      body: JSON.stringify({ html: "<!DOCTYPE html><html><body>v2</body></html>" }),
+    });
+    assert.equal(editRes.status, 200);
+    list = await (await fetch(`${base}/api/games`, { headers: owner })).json();
+    listed = list.games.find((g) => g.id === game.id);
+    assert.equal(listed.previewStale, true, "preview must be flagged after a new revision");
+
+    // Re-pinning clears the flag.
+    const repin = await fetch(`${base}/api/games/${game.id}/preview`, {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ image: pngDataUrl }),
+    });
+    assert.equal(repin.status, 200);
+    list = await (await fetch(`${base}/api/games`, { headers: owner })).json();
+    assert.equal(list.games.find((g) => g.id === game.id).previewStale, false);
+
+    // Deleting the game removes the bytes too.
+    const delRes = await fetch(`${base}/api/games/${game.id}`, { method: "DELETE", headers: owner });
+    assert.equal(delRes.status, 200);
+    const gone = await fetch(`${base}/api/games/${game.id}/preview`);
+    assert.equal(gone.status, 404);
+  } finally {
+    server.close();
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("served games carry the capture helper exactly once", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ludo-capture-"));
+  const dbPath = join(dir, "capture.db");
+  const { server, store } = createAppServer({ dbPath, adminKey: "capture-admin" });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Creator-Token": "capture-owner",
+    "X-Admin-Key": "capture-admin",
+  };
+
+  try {
+    const createRes = await fetch(`${base}/api/games`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        title: "Capture Me",
+        prompt: "capture",
+        html: "<!DOCTYPE html><html><body><canvas></canvas></body></html>",
+      }),
+    });
+    const { game } = await createRes.json();
+
+    const play = await (await fetch(`${base}/play/${game.id}`)).text();
+    const markers = play.match(/data-ludo-capture="1"/g) || [];
+    assert.equal(markers.length, 1, "helper must be injected exactly once");
+    assert.match(play, /ludo:capture-request/);
+    assert.match(play, /ludo:capture-result/);
+
+    // Raw HTML in the database stays clean: the helper is a serving concern.
+    assert.equal(store.getGame(game.id).html.includes("data-ludo-capture"), false);
+  } finally {
+    server.close();
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
