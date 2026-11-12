@@ -70,6 +70,7 @@
   }
 
   .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .segmented.four { grid-template-columns: repeat(4, 1fr); }
 
   .segmented button {
     display: grid;
@@ -178,6 +179,27 @@
     gap: 12px;
   }
 
+  .hud-right {
+    display: grid;
+    gap: 4px;
+    justify-items: end;
+  }
+
+  .hud-sub {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .timer {
+    font-size: clamp(18px, 6vw, 24px);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #6fe3ff;
+    font-variant-numeric: tabular-nums;
+  }
+  .timer.over { color: #ff5a6b; }
+
   .target-box {
     display: flex;
     align-items: baseline;
@@ -205,6 +227,12 @@
   #progress {
     font-size: 14px;
     letter-spacing: 0.16em;
+    color: #9db6d8;
+  }
+
+  #solved {
+    font-size: 13px;
+    letter-spacing: 0.1em;
     color: #9db6d8;
   }
 
@@ -275,6 +303,8 @@
     color: #6d86a8;
   }
 
+  .hint.warn { color: #ff8095; }
+
   .actions { display: grid; gap: 10px; justify-items: center; }
   .stats { color: #cfe6ff; }
   .stats b { color: #6fffb8; }
@@ -317,6 +347,15 @@
           </button>
         </div>
       </fieldset>
+      <fieldset class="sizes">
+        <legend data-i18n="timeLabel">Time</legend>
+        <div class="segmented four" id="timeGroup" role="radiogroup">
+          <button type="button" role="radio" data-minutes="1" aria-checked="false">1 min</button>
+          <button type="button" role="radio" data-minutes="2" aria-checked="true">2 min</button>
+          <button type="button" role="radio" data-minutes="5" aria-checked="false">5 min</button>
+          <button type="button" role="radio" data-minutes="10" aria-checked="false">10 min</button>
+        </div>
+      </fieldset>
       <label><span data-i18n="letters">Letters</span>
         <input id="letters" type="text" value="abd" autocomplete="off" autocapitalize="characters" spellcheck="false">
       </label>
@@ -332,7 +371,13 @@
 <main id="game" class="hidden">
   <header id="hud">
     <div class="target-box"><span class="label" data-i18n="targetLabel">target</span><strong id="targetHud">–</strong></div>
-    <div id="progress">0/0</div>
+    <div class="hud-right">
+      <span class="timer" id="timer">0:00</span>
+      <div class="hud-sub">
+        <span id="progress">0/0</span>
+        <span id="solved"></span>
+      </div>
+    </div>
   </header>
   <div id="boardWrap"><div id="grid"></div></div>
   <p id="hint" class="hint"></p>
@@ -340,7 +385,7 @@
 
 <div id="done" class="panel hidden">
   <div class="card">
-    <h1 data-i18n="complete">COMPLETE</h1>
+    <h1 data-i18n="timeUpTitle">TIME'S UP</h1>
     <p id="doneStats" class="lead stats"></p>
     <div class="actions">
       <button id="replay" type="button" data-i18n="replay">Replay</button>
@@ -366,6 +411,9 @@
   const hintEl = $("hint");
   const doneStats = $("doneStats");
   const boardWrap = $("boardWrap");
+  const timerEl = $("timer");
+  const solvedEl = $("solved");
+  const timeGroup = $("timeGroup");
 
   const SIZE_PRESETS = {
     small: { cols: 3, rows: 6 },
@@ -385,13 +433,16 @@
       targetLetter: "Target letter",
       targetLabel: "target",
       start: "Start",
+      timeLabel: "Time",
       hint: 'Tap every "{letter}" from top-left to bottom-right.',
-      complete: "COMPLETE",
+      solvedHud: "Solved: {n}",
+      timeUp: "Time's up - finish this board.",
+      timeUpTitle: "TIME'S UP",
       replay: "Replay",
       change: "Change setup",
       errLetters: "Use at least two different letters.",
       errTarget: "Pick a target letter from the list.",
-      stats: "Target <b>{target}</b> · {count} letters<br>{seconds}s · {wrongText}",
+      stats: "Target <b>{target}</b> · {solvedText}<br>{minutes} min round · {wrongText}",
     },
     es: {
       title: "Orden de Letras",
@@ -404,13 +455,16 @@
       targetLetter: "Letra objetivo",
       targetLabel: "objetivo",
       start: "Empezar",
+      timeLabel: "Tiempo",
       hint: 'Toca cada "{letter}" de arriba-izquierda a abajo-derecha.',
-      complete: "COMPLETADO",
+      solvedHud: "Resueltas: {n}",
+      timeUp: "Se acabó el tiempo - termina esta tabla.",
+      timeUpTitle: "SE ACABÓ EL TIEMPO",
       replay: "Jugar de nuevo",
       change: "Cambiar ajustes",
       errLetters: "Usa al menos dos letras distintas.",
       errTarget: "Elige una letra objetivo de la lista.",
-      stats: "Objetivo <b>{target}</b> · {count} letras<br>{seconds}s · {wrongText}",
+      stats: "Objetivo <b>{target}</b> · {solvedText}<br>Ronda de {minutes} min · {wrongText}",
     },
   };
 
@@ -428,6 +482,18 @@
   }
 
   let state = null;
+
+  // Session state: idle (setup) -> playing -> timeup (finish the board in
+  // progress) -> done (summary shown).
+  let phase = "idle";
+  let endsAt = 0;
+  let clockId = null;
+  let advanceId = null;
+  let solvedCount = 0;
+  let mistakes = 0;
+  let boardSolved = false;
+
+  const ADVANCE_DELAY = 700;
 
   function applyTranslations() {
     document.documentElement.lang = LANG;
@@ -460,6 +526,7 @@
   lettersInput.addEventListener("input", syncTargetOptions);
 
   let selectedSize = "medium";
+  let selectedMinutes = 2;
 
   sizeGroup.addEventListener("click", (event) => {
     const button = event.target.closest("[data-size]");
@@ -515,10 +582,25 @@
   function updateHud() {
     progressEl.textContent = `${state.next}/${state.targets.length}`;
     targetHud.textContent = state.target;
-    hintEl.textContent = t("hint", { letter: state.target });
+    solvedEl.textContent = t("solvedHud", { n: solvedCount });
+    if (phase !== "timeup") hintEl.textContent = t("hint", { letter: state.target });
   }
 
-  function startGame(config) {
+  function formatClock(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  }
+
+  function paintClock() {
+    timerEl.textContent = formatClock(endsAt - performance.now());
+  }
+
+  function stopClock() {
+    clearInterval(clockId);
+    clockId = null;
+  }
+
+  function beginBoard(config) {
     const total = config.cols * config.rows;
     const fill = Array.from(
       { length: total },
@@ -540,31 +622,74 @@
       fill,
       targets,
       next: 0,
-      mistakes: 0,
-      startedAt: performance.now(),
       status: "playing",
     };
-
-    setupPanel.classList.add("hidden");
-    donePanel.classList.add("hidden");
-    gamePanel.classList.remove("hidden");
+    boardSolved = false;
+    hintEl.classList.remove("warn");
     // Update the HUD first: the hint changes the space available to the board.
     updateHud();
     buildBoard();
   }
 
-  function finishGame() {
+  function startSession(config) {
+    stopClock();
+    clearTimeout(advanceId);
+    phase = "playing";
+    solvedCount = 0;
+    mistakes = 0;
+    endsAt = performance.now() + config.minutes * 60000;
+    timerEl.classList.remove("over");
+    setupPanel.classList.add("hidden");
+    donePanel.classList.add("hidden");
+    gamePanel.classList.remove("hidden");
+    beginBoard(config);
+    paintClock();
+    clockId = setInterval(() => {
+      paintClock();
+      if (performance.now() >= endsAt) endTime();
+    }, 250);
+  }
+
+  // The clock ran out: no more boards, but the board on screen is always
+  // finishable, even if no cell was tapped yet. The session only ends on its
+  // own when the board was already solved and the next one never arrived.
+  function endTime() {
+    if (phase !== "playing") return;
+    stopClock();
+    phase = "timeup";
+    timerEl.textContent = formatClock(0);
+    timerEl.classList.add("over");
+    clearTimeout(advanceId);
+    if (boardSolved) { showResult(); return; }
+    hintEl.textContent = t("timeUp");
+    hintEl.classList.add("warn");
+  }
+
+  function completeBoard() {
     state.status = "done";
-    const seconds = ((performance.now() - state.startedAt) / 1000).toFixed(1);
-    const wrong = state.mistakes;
+    boardSolved = true;
+    solvedCount += 1;
+    updateHud();
+    if (phase === "timeup") advanceId = setTimeout(showResult, 600);
+    else advanceId = setTimeout(() => { if (phase === "playing") beginBoard(state); }, ADVANCE_DELAY);
+  }
+
+  function showResult() {
+    phase = "done";
+    stopClock();
+    clearTimeout(advanceId);
+    const solvedText =
+      LANG === "es"
+        ? `${solvedCount} ${solvedCount === 1 ? "tabla resuelta" : "tablas resueltas"}`
+        : `${solvedCount} ${solvedCount === 1 ? "board solved" : "boards solved"}`;
     const wrongText =
       LANG === "es"
-        ? `${wrong} ${wrong === 1 ? "toque incorrecto" : "toques incorrectos"}`
-        : `${wrong} ${wrong === 1 ? "wrong tap" : "wrong taps"}`;
+        ? `${mistakes} ${mistakes === 1 ? "toque incorrecto" : "toques incorrectos"}`
+        : `${mistakes} ${mistakes === 1 ? "wrong tap" : "wrong taps"}`;
     doneStats.innerHTML = t("stats", {
       target: state.target,
-      count: state.targets.length,
-      seconds,
+      solvedText,
+      minutes: state.minutes,
       wrongText,
     });
     donePanel.classList.remove("hidden");
@@ -584,12 +709,21 @@
       return showError(t("errTarget"));
     }
 
-    startGame({ cols, rows, letters, target });
+    startSession({ cols, rows, letters, target, minutes: selectedMinutes });
   }
 
   // No <form>: the app runs games in a sandboxed iframe without `allow-forms` and a
   // `form-action 'none'` CSP, so native submission is blocked by the browser.
   $("startBtn").addEventListener("click", startFromSetup);
+
+  timeGroup.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-minutes]");
+    if (!button) return;
+    selectedMinutes = Number(button.dataset.minutes);
+    for (const option of timeGroup.querySelectorAll("[data-minutes]")) {
+      option.setAttribute("aria-checked", String(option === button));
+    }
+  });
 
   $("setupForm").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && event.target.tagName !== "SELECT") {
@@ -608,11 +742,11 @@
       cell.classList.add("ok");
       state.next += 1;
       updateHud();
-      if (state.next === state.targets.length) finishGame();
+      if (state.next === state.targets.length) completeBoard();
       return;
     }
 
-    state.mistakes += 1;
+    mistakes += 1;
     cell.classList.remove("bad");
     void cell.offsetWidth;
     cell.classList.add("bad");
@@ -620,10 +754,20 @@
   });
 
   $("replay").addEventListener("click", () => {
-    if (state) startGame({ cols: state.cols, rows: state.rows, letters: state.letters, target: state.target });
+    if (!state) return;
+    startSession({
+      cols: state.cols,
+      rows: state.rows,
+      letters: state.letters,
+      target: state.target,
+      minutes: state.minutes,
+    });
   });
 
   $("change").addEventListener("click", () => {
+    stopClock();
+    clearTimeout(advanceId);
+    phase = "idle";
     donePanel.classList.add("hidden");
     gamePanel.classList.add("hidden");
     setupPanel.classList.remove("hidden");

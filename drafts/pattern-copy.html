@@ -160,7 +160,11 @@
     font-size: 13px;
     color: #9db6d8;
   }
-  .hud b { color: #e6f1ff; }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 
   button {
     appearance: none;
@@ -176,7 +180,58 @@
     cursor: pointer;
   }
   button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
   button.primary { background: rgba(90, 174, 255, 0.25); border-color: #5aaeff; }
+
+  .timer {
+    font-size: clamp(16px, 4.5vw, 22px);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #5aaeff;
+    font-variant-numeric: tabular-nums;
+  }
+  .timer.over { color: #ff5a6b; }
+
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: rgba(7, 10, 20, 0.88);
+  }
+  .overlay-card {
+    width: min(380px, 100%);
+    display: grid;
+    gap: 14px;
+    padding: 20px;
+    border: 1px solid rgba(120, 190, 255, 0.25);
+    border-radius: 16px;
+    background: rgba(8, 13, 27, 0.96);
+    text-align: center;
+  }
+  .overlay-step {
+    display: grid;
+    gap: 14px;
+  }
+  .overlay-title {
+    margin: 0;
+    font-size: 16px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .overlay-body {
+    margin: 0;
+    font-size: 24px;
+    color: #4ade80;
+  }
+  .durations {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
 
   .toast {
     position: fixed;
@@ -200,7 +255,7 @@
 <body>
   <header>
     <h1 data-i18n="title">PATTERN COPY</h1>
-    <button id="newBtn" type="button" class="primary" data-i18n="newPattern">New pattern</button>
+    <span class="timer" id="timer">0:00</span>
   </header>
 
   <div class="panels">
@@ -219,13 +274,28 @@
   </div>
 
   <footer>
-    <span class="hud" id="progress">0 / 0</span>
-    <div style="display:flex;gap:8px">
+    <span class="hud" id="solved"></span>
+    <div class="actions">
+      <button id="newBtn" type="button" data-i18n="newPattern">New pattern</button>
       <button id="checkBtn" type="button" class="primary" data-i18n="check">Check</button>
       <button id="undoBtn" type="button" data-i18n="undo">Undo</button>
       <button id="clearBtn" type="button" data-i18n="clear">Clear</button>
     </div>
   </footer>
+
+  <div class="overlay" id="overlay">
+    <div class="overlay-card">
+      <div class="overlay-step" id="setupPanel">
+        <p class="overlay-title" data-i18n="setupTitle">How long do you want to play?</p>
+        <div class="durations" id="durations"></div>
+      </div>
+      <div class="overlay-step hidden" id="resultPanel">
+        <p class="overlay-title" data-i18n="resultTitle">Time's up</p>
+        <p class="overlay-body" id="resultBody"></p>
+        <button id="againBtn" type="button" class="primary" data-i18n="playAgain">Play again</button>
+      </div>
+    </div>
+  </div>
 
   <div class="toast" id="toast"></div>
 
@@ -242,10 +312,15 @@
       undo: "Undo",
       clear: "Clear",
       check: "Check",
-      progress: "{n} / {total} lines",
       toastOk: "Pattern matches!",
       toastBad: "Does not match: {wrong} extra, {missing} missing.",
-      hint: "Draw lines between dots. Check when done.",
+      setupTitle: "How long do you want to play?",
+      minutes: "{n} min",
+      solved: "Solved: {n}",
+      timeUp: "Time's up - finish this pattern.",
+      resultTitle: "Time's up",
+      resultBody: "Patterns solved: {n}",
+      playAgain: "Play again",
     },
     es: {
       title: "Copiar Patrón",
@@ -255,10 +330,15 @@
       undo: "Deshacer",
       clear: "Limpiar",
       check: "Verificar",
-      progress: "{n} / {total} líneas",
       toastOk: "¡El patrón coincide!",
       toastBad: "No coincide: {wrong} de más, {missing} faltan.",
-      hint: "Dibuja líneas entre puntos. Verifica al terminar.",
+      setupTitle: "¿Cuánto tiempo quieres jugar?",
+      minutes: "{n} min",
+      solved: "Resueltos: {n}",
+      timeUp: "Se acabó el tiempo - termina este patrón.",
+      resultTitle: "Se acabó el tiempo",
+      resultBody: "Patrones resueltos: {n}",
+      playAgain: "Jugar de nuevo",
     },
   };
 
@@ -298,8 +378,15 @@
 
   const svgEx = document.getElementById("svgEx");
   const svgPlay = document.getElementById("svgPlay");
-  const progressEl = document.getElementById("progress");
   const toastEl = document.getElementById("toast");
+  const timerEl = document.getElementById("timer");
+  const solvedEl = document.getElementById("solved");
+  const overlayEl = document.getElementById("overlay");
+  const setupPanelEl = document.getElementById("setupPanel");
+  const resultPanelEl = document.getElementById("resultPanel");
+  const resultBodyEl = document.getElementById("resultBody");
+  const durationsEl = document.getElementById("durations");
+  const newBtnEl = document.getElementById("newBtn");
 
   let targetEdges = new Set();   // "a-b" with a<b
   let userEdges = [];            // ordered list of "a-b"
@@ -308,6 +395,17 @@
   let hoverNode = null;
   let isChecked = false;
   let toastTimer = null;
+
+  // Round state: idle (picking a duration) -> playing -> timeup (finish the
+  // pattern in progress) -> over (result shown).
+  const DURATIONS = [1, 2, 5, 10];
+  const ADVANCE_DELAY = 900;
+  let phase = "idle";
+  let endsAt = 0;
+  let clockId = null;
+  let advanceId = null;
+  let solvedCount = 0;
+  let patternSolved = false;
 
   function edgeKey(a, b) { return a < b ? `${a}-${b}` : `${b}-${a}`; }
 
@@ -490,7 +588,6 @@
     });
     paintNodes();
     paintPreview();
-    updateProgress();
   }
 
   function paintNodes() {
@@ -548,11 +645,8 @@
     return best;
   }
 
-  function updateProgress() {
-    progressEl.textContent = t("progress", { n: unitsOf(userEdges).size, total: targetEdges.size });
-  }
-
   function generatePattern() {
+    if (phase !== "playing") return;
     // Build the target in canonical form so a long stroke and the shorter
     // strokes that share its nodes are the same pattern.
     const set = new Set();
@@ -566,6 +660,7 @@
     }
     targetEdges = set;
     userEdges = [];
+    patternSolved = false;
     hideToast();
     dragStart = null;
     dragPos = null;
@@ -604,6 +699,7 @@
   }
 
   function checkPattern() {
+    if (phase === "idle" || phase === "over" || patternSolved) return;
     const units = unitsOf(userEdges);
     const extra = [...units].filter((k) => !targetEdges.has(k)).length;
     const missing = [...targetEdges].filter((k) => !units.has(k)).length;
@@ -611,12 +707,94 @@
     isChecked = true;
     renderPlay();
     if (ok) {
+      patternSolved = true;
+      solvedCount += 1;
+      updateSolved();
       beep(523, 0.1); setTimeout(() => beep(659, 0.1), 110); setTimeout(() => beep(784, 0.15), 220);
       showToast(t("toastOk"), "ok");
+      if (phase === "timeup") advanceId = setTimeout(showResult, ADVANCE_DELAY);
+      else advanceId = setTimeout(() => generatePattern(), ADVANCE_DELAY);
     } else {
       beep(220, 0.12, "square", 0.08);
       showToast(t("toastBad", { wrong: extra, missing }), "bad");
     }
+  }
+
+  function formatClock(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  }
+
+  function paintClock() {
+    timerEl.textContent = formatClock(endsAt - performance.now());
+  }
+
+  function updateSolved() {
+    solvedEl.textContent = t("solved", { n: solvedCount });
+  }
+
+  function setPhase(next) {
+    phase = next;
+    newBtnEl.disabled = next !== "playing";
+  }
+
+  function stopClock() {
+    clearInterval(clockId);
+    clockId = null;
+  }
+
+  function startRound(minutes) {
+    stopClock();
+    clearTimeout(advanceId);
+    setPhase("playing");
+    solvedCount = 0;
+    endsAt = performance.now() + minutes * 60000;
+    timerEl.classList.remove("over");
+    updateSolved();
+    setupPanelEl.classList.add("hidden");
+    resultPanelEl.classList.add("hidden");
+    overlayEl.classList.add("hidden");
+    generatePattern();
+    paintClock();
+    clockId = setInterval(() => {
+      paintClock();
+      if (performance.now() >= endsAt) endTime();
+    }, 250);
+  }
+
+  // The clock ran out: no new patterns, but the pattern on screen is always
+  // finishable, even if no stroke was drawn yet. The round only ends on its
+  // own when the pattern was already solved and the next one never arrived.
+  function endTime() {
+    if (phase !== "playing") return;
+    stopClock();
+    setPhase("timeup");
+    timerEl.textContent = formatClock(0);
+    timerEl.classList.add("over");
+    clearTimeout(advanceId);
+    if (patternSolved) { showResult(); return; }
+    showToast(t("timeUp"), "bad");
+  }
+
+  function showResult() {
+    setPhase("over");
+    stopClock();
+    clearTimeout(advanceId);
+    resultBodyEl.textContent = t("resultBody", { n: solvedCount });
+    setupPanelEl.classList.add("hidden");
+    resultPanelEl.classList.remove("hidden");
+    overlayEl.classList.remove("hidden");
+  }
+
+  function showSetup() {
+    setPhase("idle");
+    stopClock();
+    clearTimeout(advanceId);
+    timerEl.textContent = formatClock(0);
+    timerEl.classList.remove("over");
+    setupPanelEl.classList.remove("hidden");
+    resultPanelEl.classList.add("hidden");
+    overlayEl.classList.remove("hidden");
   }
 
   // A node press starts a drag. Edges are only created by dragging from one
@@ -641,6 +819,7 @@
   // Drag, tap and cancel all run through the <svg> that owns the pointer
   // capture, so they keep working no matter what the line layers look like.
   function onPointerDown(e) {
+    if (phase !== "playing" && phase !== "timeup") return;
     if (activePointer !== null) return;                 // one finger at a time
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const p = svgPoint(e.clientX, e.clientY);
@@ -739,8 +918,11 @@
     svgPlay.addEventListener("touchmove", stopTouch, { passive: false });
   }
 
-  document.getElementById("newBtn").addEventListener("click", generatePattern);
+  document.getElementById("newBtn").addEventListener("click", () => {
+    if (phase === "playing") generatePattern();
+  });
   document.getElementById("undoBtn").addEventListener("click", () => {
+    if (phase !== "playing" && phase !== "timeup") return;
     userEdges.pop();
     hideToast();
     resetGesture();
@@ -748,6 +930,7 @@
     renderPlay();
   });
   document.getElementById("clearBtn").addEventListener("click", () => {
+    if (phase !== "playing" && phase !== "timeup") return;
     userEdges = [];
     hideToast();
     resetGesture();
@@ -756,10 +939,14 @@
   });
 
   document.getElementById("checkBtn").addEventListener("click", checkPattern);
+  document.getElementById("againBtn").addEventListener("click", showSetup);
 
   // No <form>: iframe sandbox has no allow-forms and CSP form-action 'none'.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); generatePattern(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (phase === "playing") generatePattern();
+    }
     if (e.key === "Escape") resetGesture();
   });
 
@@ -770,8 +957,18 @@
     el.textContent = t(el.dataset.i18n);
   }
 
+  DURATIONS.forEach((minutes) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = t("minutes", { n: minutes });
+    btn.addEventListener("click", () => startRound(minutes));
+    durationsEl.appendChild(btn);
+  });
+
   buildPlayBoard();
-  generatePattern();
+  renderPlay();
+  updateSolved();
+  showSetup();
   paintDebug();
 })();
 </script>
