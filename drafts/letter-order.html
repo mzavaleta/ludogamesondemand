@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Letter Order</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #070a14;
+    color: #e6f1ff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .hidden { display: none !important; }
+
+  .panel {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: radial-gradient(circle at 50% 40%, rgba(20, 36, 76, 0.94), #04060e);
+    overflow-y: auto;
+  }
+
+  .card {
+    width: min(420px, 100%);
+    display: grid;
+    gap: 18px;
+    padding: 28px 22px;
+    border: 1px solid rgba(120, 190, 255, 0.12);
+    border-radius: 20px;
+    background: rgba(8, 13, 27, 0.9);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(26px, 8vw, 40px);
+    letter-spacing: 0.12em;
+    text-align: center;
+    text-transform: uppercase;
+    text-shadow: 0 0 22px rgba(90, 190, 255, 0.45);
+  }
+
+  .lead {
+    margin: 0;
+    text-align: center;
+    color: #9db6d8;
+    font-size: 14px;
+    line-height: 1.6;
+    text-wrap: balance;
+  }
+
+  .setup-form { display: grid; gap: 14px; }
+
+  .sizes { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .sizes legend {
+    padding: 0;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #7fa2cc;
+  }
+
+  .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+
+  .segmented button {
+    display: grid;
+    gap: 2px;
+    justify-items: center;
+    padding: 10px 6px;
+    border-radius: 10px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    box-shadow: none;
+    background: #0c1428;
+    border-color: rgba(120, 190, 255, 0.22);
+    color: #9db6d8;
+  }
+
+  .segmented button small {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: #6d86a8;
+  }
+
+  .segmented button[aria-checked="true"] {
+    background: linear-gradient(180deg, rgba(90, 200, 255, 0.42), rgba(90, 200, 255, 0.12));
+    border-color: #6fe3ff;
+    color: #ffffff;
+    box-shadow: 0 0 18px rgba(80, 220, 255, 0.3);
+  }
+
+  .segmented button[aria-checked="true"] small { color: #cfefff; }
+
+  label {
+    display: grid;
+    gap: 6px;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #7fa2cc;
+  }
+
+  input, select {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid rgba(120, 190, 255, 0.28);
+    border-radius: 10px;
+    background: #0c1428;
+    color: #e6f1ff;
+    font: inherit;
+    font-size: 18px;
+    letter-spacing: 0.08em;
+  }
+
+  input:focus, select:focus {
+    outline: none;
+    border-color: #4fc3ff;
+    box-shadow: 0 0 0 3px rgba(79, 195, 255, 0.18);
+  }
+
+  button {
+    padding: 14px 22px;
+    border: 1px solid rgba(120, 220, 255, 0.7);
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(90, 200, 255, 0.26), rgba(90, 200, 255, 0.06));
+    color: #eaf8ff;
+    font: inherit;
+    font-size: 15px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    cursor: pointer;
+    touch-action: manipulation;
+    box-shadow: 0 0 24px rgba(50, 160, 255, 0.25);
+  }
+
+  button:active { transform: scale(0.98); }
+
+  button.ghost {
+    background: transparent;
+    border-color: rgba(140, 170, 210, 0.35);
+    color: #9db6d8;
+    box-shadow: none;
+  }
+
+  .error {
+    min-height: 16px;
+    margin: 0;
+    color: #ff8095;
+    font-size: 13px;
+    text-align: center;
+  }
+
+  /* --- game --- */
+  #game {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: calc(14px + env(safe-area-inset-top, 0px)) 12px 18px;
+  }
+
+  #hud {
+    width: min(94vw, 640px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .target-box {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 16px;
+    border: 1px solid rgba(120, 190, 255, 0.24);
+    border-radius: 12px;
+    background: #0c1428;
+  }
+
+  .target-box .label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #7fa2cc;
+  }
+
+  #targetHud {
+    font-size: 26px;
+    line-height: 1;
+    color: #6fe3ff;
+    text-shadow: 0 0 16px rgba(80, 220, 255, 0.6);
+  }
+
+  #progress {
+    font-size: 14px;
+    letter-spacing: 0.16em;
+    color: #9db6d8;
+  }
+
+  #boardWrap {
+    flex: 1;
+    display: flex;
+    align-items: safe center;
+    justify-content: safe center;
+    width: 100%;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 4), var(--cell, 56px));
+    grid-auto-rows: var(--cell, 56px);
+    gap: var(--gap, 6px);
+    touch-action: manipulation;
+  }
+
+  .cell {
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(120, 190, 255, 0.18);
+    border-radius: 10px;
+    background: #0d1730;
+    color: #cfe6ff;
+    font: inherit;
+    font-size: max(10px, calc(var(--cell, 56px) * 0.42));
+    line-height: 1;
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
+    transition: background 0.14s, border-color 0.14s, color 0.14s, transform 0.1s;
+    touch-action: manipulation;
+  }
+
+  .cell:active { transform: scale(0.95); }
+
+  .cell.ok {
+    background: #0f3d2a;
+    border-color: #2ee88a;
+    color: #6fffb8;
+    box-shadow: 0 0 18px rgba(46, 232, 138, 0.35);
+    transform: none;
+  }
+
+  .cell.bad {
+    border-color: #ff4d6d;
+    background: #4a0f1c;
+    color: #ffb3c1;
+    animation: bad-flash 0.34s ease-out;
+  }
+
+  @keyframes bad-flash {
+    0% { background: #ff3355; color: #fff; transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    100% { transform: translateX(0); }
+  }
+
+  .hint {
+    margin: 0;
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: #6d86a8;
+  }
+
+  .actions { display: grid; gap: 10px; justify-items: center; }
+  .stats { color: #cfe6ff; }
+  .stats b { color: #6fffb8; }
+
+  /* Short viewports (phone landscape): keep the whole setup visible without scrolling. */
+  @media (max-height: 560px) {
+    .panel { padding: 10px; }
+    .card { padding: 16px 18px; gap: 10px; border-radius: 14px; }
+    h1 { font-size: 22px; }
+    .lead { font-size: 11px; line-height: 1.4; }
+    .setup-form { gap: 8px; }
+    label { gap: 3px; font-size: 9px; letter-spacing: 0.14em; }
+    input, select { padding: 7px 10px; font-size: 15px; }
+    .error { min-height: 12px; font-size: 11px; }
+    button { padding: 10px 18px; font-size: 13px; }
+    .segmented button { padding: 8px 4px; font-size: 11px; }
+    .segmented button small { font-size: 9px; }
+    .actions { gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="setup" class="panel">
+  <div class="card">
+    <h1 data-i18n="title">LETTER ORDER</h1>
+    <p class="lead" data-i18n="lead">Tap every target letter in reading order: top to bottom, left to right.</p>
+    <div id="setupForm" class="setup-form">
+      <fieldset class="sizes">
+        <legend data-i18n="size">Size</legend>
+        <div class="segmented" id="sizeGroup" role="radiogroup">
+          <button type="button" role="radio" data-size="small" aria-checked="false">
+            <span data-i18n="sizeSmall">Small</span><small>3 × 6</small>
+          </button>
+          <button type="button" role="radio" data-size="medium" aria-checked="true">
+            <span data-i18n="sizeMedium">Medium</span><small>6 × 12</small>
+          </button>
+          <button type="button" role="radio" data-size="large" aria-checked="false">
+            <span data-i18n="sizeLarge">Large</span><small>12 × 24</small>
+          </button>
+        </div>
+      </fieldset>
+      <label><span data-i18n="letters">Letters</span>
+        <input id="letters" type="text" value="abd" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      </label>
+      <label><span data-i18n="targetLetter">Target letter</span>
+        <select id="target"></select>
+      </label>
+      <p id="error" class="error" role="alert"></p>
+      <button id="startBtn" type="button" data-i18n="start">Start</button>
+    </div>
+  </div>
+</div>
+
+<main id="game" class="hidden">
+  <header id="hud">
+    <div class="target-box"><span class="label" data-i18n="targetLabel">target</span><strong id="targetHud">–</strong></div>
+    <div id="progress">0/0</div>
+  </header>
+  <div id="boardWrap"><div id="grid"></div></div>
+  <p id="hint" class="hint"></p>
+</main>
+
+<div id="done" class="panel hidden">
+  <div class="card">
+    <h1 data-i18n="complete">COMPLETE</h1>
+    <p id="doneStats" class="lead stats"></p>
+    <div class="actions">
+      <button id="replay" type="button" data-i18n="replay">Replay</button>
+      <button id="change" type="button" class="ghost" data-i18n="change">Change setup</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  const setupPanel = $("setup");
+  const gamePanel = $("game");
+  const donePanel = $("done");
+  const grid = $("grid");
+  const sizeGroup = $("sizeGroup");
+  const lettersInput = $("letters");
+  const targetSelect = $("target");
+  const errorEl = $("error");
+  const targetHud = $("targetHud");
+  const progressEl = $("progress");
+  const hintEl = $("hint");
+  const doneStats = $("doneStats");
+  const boardWrap = $("boardWrap");
+
+  const SIZE_PRESETS = {
+    small: { cols: 3, rows: 6 },
+    medium: { cols: 6, rows: 12 },
+    large: { cols: 12, rows: 24 },
+  };
+
+  const STRINGS = {
+    en: {
+      title: "Letter Order",
+      lead: "Tap every target letter in reading order: top to bottom, left to right.",
+      size: "Size",
+      sizeSmall: "Small",
+      sizeMedium: "Medium",
+      sizeLarge: "Large",
+      letters: "Letters",
+      targetLetter: "Target letter",
+      targetLabel: "target",
+      start: "Start",
+      hint: 'Tap every "{letter}" from top-left to bottom-right.',
+      complete: "COMPLETE",
+      replay: "Replay",
+      change: "Change setup",
+      errLetters: "Use at least two different letters.",
+      errTarget: "Pick a target letter from the list.",
+      stats: "Target <b>{target}</b> · {count} letters<br>{seconds}s · {wrongText}",
+    },
+    es: {
+      title: "Orden de Letras",
+      lead: "Toca cada letra objetivo en orden de lectura: de arriba abajo, de izquierda a derecha.",
+      size: "Tamaño",
+      sizeSmall: "Chico",
+      sizeMedium: "Mediano",
+      sizeLarge: "Grande",
+      letters: "Letras",
+      targetLetter: "Letra objetivo",
+      targetLabel: "objetivo",
+      start: "Empezar",
+      hint: 'Toca cada "{letter}" de arriba-izquierda a abajo-derecha.',
+      complete: "COMPLETADO",
+      replay: "Jugar de nuevo",
+      change: "Cambiar ajustes",
+      errLetters: "Usa al menos dos letras distintas.",
+      errTarget: "Elige una letra objetivo de la lista.",
+      stats: "Objetivo <b>{target}</b> · {count} letras<br>{seconds}s · {wrongText}",
+    },
+  };
+
+  // `?lang=es|en` overrides the browser preference; used for manual testing.
+  const requestedLang = new URLSearchParams(location.search).get("lang");
+  const browserLang = (navigator.languages && navigator.languages[0]) || navigator.language || "en";
+  const LANG = (requestedLang || browserLang).toLowerCase().startsWith("es") ? "es" : "en";
+
+  /** Resolves a UI string, falling back to English and then to the key itself. */
+  function t(key, vars = {}) {
+    const template = STRINGS[LANG][key] ?? STRINGS.en[key] ?? key;
+    return template.replace(/\{(\w+)\}/g, (match, name) =>
+      name in vars ? String(vars[name]) : match
+    );
+  }
+
+  let state = null;
+
+  function applyTranslations() {
+    document.documentElement.lang = LANG;
+    document.title = t("title");
+    for (const element of document.querySelectorAll("[data-i18n]")) {
+      element.textContent = t(element.dataset.i18n);
+    }
+    if (state) updateHud();
+  }
+
+  /** Keeps the ordered, unique list of characters the player typed. */
+  function parseLetters(raw) {
+    const chars = Array.from(String(raw).replace(/\s+/g, ""));
+    return [...new Set(chars)];
+  }
+
+  function syncTargetOptions() {
+    const letters = parseLetters(lettersInput.value);
+    const previous = targetSelect.value;
+    targetSelect.replaceChildren();
+    for (const letter of letters) {
+      const option = document.createElement("option");
+      option.value = letter;
+      option.textContent = letter;
+      targetSelect.appendChild(option);
+    }
+    if (letters.includes(previous)) targetSelect.value = previous;
+  }
+
+  lettersInput.addEventListener("input", syncTargetOptions);
+
+  let selectedSize = "medium";
+
+  sizeGroup.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-size]");
+    if (!button) return;
+    selectedSize = button.dataset.size;
+    for (const option of sizeGroup.querySelectorAll("[data-size]")) {
+      option.setAttribute("aria-checked", String(option === button));
+    }
+  });
+
+  function showError(message) {
+    errorEl.textContent = message;
+  }
+
+  function layout() {
+    if (!state) return;
+    const gap = 6;
+    // Measure the real free space instead of guessing from the viewport: the HUD and
+    // hint take different room depending on orientation.
+    const availableWidth = boardWrap.clientWidth;
+    const availableHeight = boardWrap.clientHeight;
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+
+    const fit = Math.floor(
+      Math.min(
+        (availableWidth - gap * (state.cols - 1)) / state.cols,
+        (availableHeight - gap * (state.rows - 1)) / state.rows
+      )
+    );
+    // Below this the letters stop being readable; anything bigger than the screen scrolls.
+    const cell = Math.max(14, fit);
+
+    grid.style.setProperty("--cell", `${cell}px`);
+    grid.style.setProperty("--gap", `${gap}px`);
+    grid.style.setProperty("--cols", state.cols);
+  }
+
+  function buildBoard() {
+    grid.replaceChildren();
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < state.fill.length; index += 1) {
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "cell";
+      cell.dataset.index = String(index);
+      cell.textContent = state.fill[index];
+      fragment.appendChild(cell);
+    }
+    grid.appendChild(fragment);
+    layout();
+  }
+
+  function updateHud() {
+    progressEl.textContent = `${state.next}/${state.targets.length}`;
+    targetHud.textContent = state.target;
+    hintEl.textContent = t("hint", { letter: state.target });
+  }
+
+  function startGame(config) {
+    const total = config.cols * config.rows;
+    const fill = Array.from(
+      { length: total },
+      () => config.letters[Math.floor(Math.random() * config.letters.length)]
+    );
+
+    // A board with no target cell would be unplayable, so guarantee at least one.
+    if (!fill.includes(config.target)) {
+      fill[Math.floor(Math.random() * total)] = config.target;
+    }
+
+    const targets = [];
+    fill.forEach((letter, index) => {
+      if (letter === config.target) targets.push(index);
+    });
+
+    state = {
+      ...config,
+      fill,
+      targets,
+      next: 0,
+      mistakes: 0,
+      startedAt: performance.now(),
+      status: "playing",
+    };
+
+    setupPanel.classList.add("hidden");
+    donePanel.classList.add("hidden");
+    gamePanel.classList.remove("hidden");
+    // Update the HUD first: the hint changes the space available to the board.
+    updateHud();
+    buildBoard();
+  }
+
+  function finishGame() {
+    state.status = "done";
+    const seconds = ((performance.now() - state.startedAt) / 1000).toFixed(1);
+    const wrong = state.mistakes;
+    const wrongText =
+      LANG === "es"
+        ? `${wrong} ${wrong === 1 ? "toque incorrecto" : "toques incorrectos"}`
+        : `${wrong} ${wrong === 1 ? "wrong tap" : "wrong taps"}`;
+    doneStats.innerHTML = t("stats", {
+      target: state.target,
+      count: state.targets.length,
+      seconds,
+      wrongText,
+    });
+    donePanel.classList.remove("hidden");
+  }
+
+  function startFromSetup() {
+    showError("");
+
+    const { cols, rows } = SIZE_PRESETS[selectedSize];
+    const letters = parseLetters(lettersInput.value);
+    const target = targetSelect.value;
+
+    if (letters.length < 2) {
+      return showError(t("errLetters"));
+    }
+    if (!letters.includes(target)) {
+      return showError(t("errTarget"));
+    }
+
+    startGame({ cols, rows, letters, target });
+  }
+
+  // No <form>: the app runs games in a sandboxed iframe without `allow-forms` and a
+  // `form-action 'none'` CSP, so native submission is blocked by the browser.
+  $("startBtn").addEventListener("click", startFromSetup);
+
+  $("setupForm").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.tagName !== "SELECT") {
+      event.preventDefault();
+      startFromSetup();
+    }
+  });
+
+  grid.addEventListener("click", (event) => {
+    const cell = event.target.closest(".cell");
+    if (!cell || !state || state.status !== "playing") return;
+    if (cell.classList.contains("ok")) return;
+
+    const index = Number(cell.dataset.index);
+    if (index === state.targets[state.next]) {
+      cell.classList.add("ok");
+      state.next += 1;
+      updateHud();
+      if (state.next === state.targets.length) finishGame();
+      return;
+    }
+
+    state.mistakes += 1;
+    cell.classList.remove("bad");
+    void cell.offsetWidth;
+    cell.classList.add("bad");
+    setTimeout(() => cell.classList.remove("bad"), 360);
+  });
+
+  $("replay").addEventListener("click", () => {
+    if (state) startGame({ cols: state.cols, rows: state.rows, letters: state.letters, target: state.target });
+  });
+
+  $("change").addEventListener("click", () => {
+    donePanel.classList.add("hidden");
+    gamePanel.classList.add("hidden");
+    setupPanel.classList.remove("hidden");
+    state = null;
+  });
+
+  window.addEventListener("resize", layout);
+
+  applyTranslations();
+  syncTargetOptions();
+})();
+</script>
+</body>
+</html>

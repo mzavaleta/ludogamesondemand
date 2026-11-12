@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pattern Copy</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #070a14;
+    color: #e6f1ff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .hidden { display: none !important; }
+
+  body {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(18px, 5vw, 26px);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-shadow: 0 0 18px rgba(90, 190, 255, 0.45);
+  }
+
+  .board-label {
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #9db6d8;
+    margin-bottom: 4px;
+  }
+
+  .grid-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(120, 190, 255, 0.12);
+    border-radius: 14px;
+    background: rgba(8, 13, 27, 0.6);
+    padding: 6px;
+    touch-action: none;
+  }
+
+  svg {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .node {
+    fill: #0f1a33;
+    stroke: #5aaeff;
+    stroke-width: 2.5;
+    cursor: grab;
+    transition: fill 0.12s ease, stroke 0.12s ease;
+    /* The nodes are the real touch targets, so they carry the gesture rules
+       too: an ancestor's touch-action alone is not honoured everywhere. */
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .node.hover { fill: #1a2a55; stroke: #ffd166; stroke-dasharray: 3 2; }
+  /* Touch devices keep :hover stuck after a tap; only style it for pointers. */
+  @media (hover: hover) {
+    .node:hover { fill: #1a2a55; }
+  }
+
+  .line-example {
+    stroke: #5aaeff;
+    stroke-width: 4;
+    stroke-linecap: round;
+    opacity: 0.9;
+  }
+  .line-drawn {
+    stroke: #ffd166;
+    stroke-width: 4;
+    stroke-linecap: round;
+  }
+  .line-good {
+    stroke: #4ade80;
+    stroke-width: 4;
+    stroke-linecap: round;
+  }
+  .line-wrong {
+    stroke: #ff5a6b;
+    stroke-width: 4;
+    stroke-linecap: round;
+  }
+
+  /* Invisible fat stroke that marks a drawn line as tappable (erase) and gives
+     desktop users a pointer cursor. The erase itself is geometric, so it does
+     not depend on this element receiving a click. */
+  .line-hit {
+    stroke: transparent;
+    stroke-width: 22;
+    stroke-linecap: round;
+    pointer-events: stroke;
+    cursor: pointer;
+    touch-action: none;
+  }
+  .line-preview {
+    stroke: #ffd166;
+    stroke-width: 3;
+    stroke-dasharray: 6 5;
+    stroke-linecap: round;
+    opacity: 0.8;
+    pointer-events: none;
+  }
+
+  .panels {
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    gap: 8px;
+    min-height: 0;
+    flex: 1;
+  }
+
+  .panel {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 0;
+  }
+
+  footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    justify-content: space-between;
+  }
+
+  .hud {
+    font-size: 13px;
+    color: #9db6d8;
+  }
+  .hud b { color: #e6f1ff; }
+
+  button {
+    appearance: none;
+    border: 1px solid rgba(120, 190, 255, 0.25);
+    background: rgba(20, 36, 76, 0.7);
+    color: #e6f1ff;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font: inherit;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  button:active { transform: scale(0.98); }
+  button.primary { background: rgba(90, 174, 255, 0.25); border-color: #5aaeff; }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    padding: 10px 16px;
+    border-radius: 12px;
+    background: rgba(8, 13, 27, 0.95);
+    border: 1px solid rgba(120, 190, 255, 0.25);
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .toast.show { opacity: 1; }
+  .toast.ok { border-color: #4ade80; color: #4ade80; }
+  .toast.bad { border-color: #ff5a6b; color: #ff5a6b; }
+</style>
+</head>
+<body>
+  <header>
+    <h1 data-i18n="title">PATTERN COPY</h1>
+    <button id="newBtn" type="button" class="primary" data-i18n="newPattern">New pattern</button>
+  </header>
+
+  <div class="panels">
+    <section class="panel">
+      <div class="board-label" data-i18n="example">Example</div>
+      <div class="grid-wrap">
+        <svg id="svgEx" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="board-label" data-i18n="yours">Yours</div>
+      <div class="grid-wrap">
+        <svg id="svgPlay" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <span class="hud" id="progress">0 / 0</span>
+    <div style="display:flex;gap:8px">
+      <button id="checkBtn" type="button" class="primary" data-i18n="check">Check</button>
+      <button id="undoBtn" type="button" data-i18n="undo">Undo</button>
+      <button id="clearBtn" type="button" data-i18n="clear">Clear</button>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  const STRINGS = {
+    en: {
+      title: "Pattern Copy",
+      newPattern: "New pattern",
+      example: "Example",
+      yours: "Yours",
+      undo: "Undo",
+      clear: "Clear",
+      check: "Check",
+      progress: "{n} / {total} lines",
+      toastOk: "Pattern matches!",
+      toastBad: "Does not match: {wrong} extra, {missing} missing.",
+      hint: "Draw lines between dots. Check when done.",
+    },
+    es: {
+      title: "Copiar Patrón",
+      newPattern: "Nuevo patrón",
+      example: "Ejemplo",
+      yours: "Tuyo",
+      undo: "Deshacer",
+      clear: "Limpiar",
+      check: "Verificar",
+      progress: "{n} / {total} líneas",
+      toastOk: "¡El patrón coincide!",
+      toastBad: "No coincide: {wrong} de más, {missing} faltan.",
+      hint: "Dibuja líneas entre puntos. Verifica al terminar.",
+    },
+  };
+
+  const requestedLang = new URLSearchParams(location.search).get("lang");
+  const browserLang = (navigator.languages && navigator.languages[0]) || navigator.language || "en";
+  const LANG = (requestedLang || browserLang).toLowerCase().startsWith("es") ? "es" : "en";
+
+  function t(key, vars = {}) {
+    const template = STRINGS[LANG][key] ?? STRINGS.en[key] ?? key;
+    return template.replace(/\{(\w+)\}/g, (match, name) =>
+      name in vars ? String(vars[name]) : match
+    );
+  }
+
+  // 3x3 grid of node centers in a 200x200 viewBox.
+  const COLS = 3, ROWS = 3;
+  const POS = [];
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      POS.push({ x: 40 + c * 60, y: 40 + r * 60 });
+  const NODE_R = 14;
+
+  let audioCtx = null;
+  function beep(freq, dur, type = "sine", gain = 0.06) {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type;
+      o.frequency.value = freq;
+      g.gain.value = gain;
+      o.connect(g).connect(audioCtx.destination);
+      o.start();
+      o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* ignore */ }
+  }
+
+  const svgEx = document.getElementById("svgEx");
+  const svgPlay = document.getElementById("svgPlay");
+  const progressEl = document.getElementById("progress");
+  const toastEl = document.getElementById("toast");
+
+  let targetEdges = new Set();   // "a-b" with a<b
+  let userEdges = [];            // ordered list of "a-b"
+  let dragStart = null;
+  let dragPos = null;
+  let hoverNode = null;
+  let isChecked = false;
+  let toastTimer = null;
+
+  function edgeKey(a, b) { return a < b ? `${a}-${b}` : `${b}-${a}`; }
+
+  function rowCol(i) { return { r: Math.floor(i / COLS), c: i % COLS }; }
+  function idxOf(r, c) { return r * COLS + c; }
+
+  function gcd(a, b) {
+    while (b) { const t = a % b; a = b; b = t; }
+    return a;
+  }
+
+  // Splits a stroke into the primitive segments that sit between adjacent grid
+  // nodes. A line crossing a node is therefore the same pattern as the two
+  // shorter lines that share that node: 0-2 => 0-1, 1-2.
+  function primitiveEdges(a, b) {
+    const from = rowCol(a), to = rowCol(b);
+    const dr = to.r - from.r, dc = to.c - from.c;
+    const hops = gcd(Math.abs(dr), Math.abs(dc));
+    if (hops === 0) return [];
+    const out = [];
+    for (let s = 0; s < hops; s++) {
+      const r1 = from.r + (dr * s) / hops, c1 = from.c + (dc * s) / hops;
+      const r2 = from.r + (dr * (s + 1)) / hops, c2 = from.c + (dc * (s + 1)) / hops;
+      out.push(edgeKey(idxOf(r1, c1), idxOf(r2, c2)));
+    }
+    return out;
+  }
+
+  // Canonical form of any stroke list: the set of primitive segments.
+  function unitsOf(strokes) {
+    const set = new Set();
+    strokes.forEach((key) => {
+      const [a, b] = key.split("-").map(Number);
+      primitiveEdges(a, b).forEach((unit) => set.add(unit));
+    });
+    return set;
+  }
+
+  // A drawn stroke is correct when every segment it covers is in the target.
+  function strokeIsCorrect(key) {
+    const [a, b] = key.split("-").map(Number);
+    return primitiveEdges(a, b).every((unit) => targetEdges.has(unit));
+  }
+
+  function showToast(text, kind) {
+    toastEl.textContent = text;
+    toastEl.className = "toast show " + kind;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.className = "toast"; }, 1400);
+  }
+
+  // Drop stale feedback as soon as the drawing changes.
+  function hideToast() {
+    clearTimeout(toastTimer);
+    toastEl.className = "toast";
+  }
+
+  function drawLines(svg, edges, kind) {
+    // lines first so nodes stay on top
+    const lines = [];
+    edges.forEach((key) => {
+      const [a, b] = key.split("-").map(Number);
+      const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      l.setAttribute("x1", POS[a].x);
+      l.setAttribute("y1", POS[a].y);
+      l.setAttribute("x2", POS[b].x);
+      l.setAttribute("y2", POS[b].y);
+      l.setAttribute("class", kind);
+      lines.push(l);
+    });
+    // insert lines before nodes
+    const nodes = Array.from(svg.querySelectorAll(".node"));
+    lines.forEach((l) => svg.insertBefore(l, nodes[0] || null));
+  }
+
+  function renderExample() {
+    svgEx.replaceChildren();
+    drawLines(svgEx, targetEdges, "line-example");
+    // nodes (non-interactive)
+    POS.forEach((p) => {
+      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", p.x);
+      c.setAttribute("cy", p.y);
+      c.setAttribute("r", NODE_R);
+      c.setAttribute("class", "node");
+      svgEx.appendChild(c);
+    });
+  }
+
+  // ---- Play board -----------------------------------------------------------
+  // Built once, then updated in place. Rebuilding the whole <svg> on every
+  // pointer event is what broke real phones: a touch pointer is implicitly
+  // captured by the element that fired pointerdown, so removing that circle
+  // mid-gesture released the capture and the browser took the drag back as a
+  // pan (pointercancel). Mouse input has no implicit capture, which is why
+  // DevTools device emulation never showed the bug.
+
+  const NS = "http://www.w3.org/2000/svg";
+  const SNAP_R = NODE_R * 1.7;   // finger-sized node target, in viewBox units
+  const TAP_SLOP = 6;            // max travel for a gesture to count as a tap
+  const ERASE_R = 12;            // tap distance to a stroke that erases it
+
+  const layerLines = document.createElementNS(NS, "g");
+  const layerHits = document.createElementNS(NS, "g");
+  const layerNodes = document.createElementNS(NS, "g");
+  const nodeEls = [];
+  let previewEl = null;
+  let activePointer = null;      // { id, x, y, moved }
+
+  // Opt-in telemetry: open the game with ?debug=1 on the failing device to see
+  // what the pointer stream really does there. Costs nothing otherwise.
+  const dbgEl = (() => {
+    if (!new URLSearchParams(location.search).has("debug")) return null;
+    const el = document.createElement("pre");
+    el.style.cssText = "position:fixed;left:8px;top:8px;margin:0;padding:8px 10px;border-radius:10px;font-size:11px;line-height:1.45;background:rgba(8,13,27,.92);border:1px solid rgba(120,190,255,.35);color:#9db6d8;z-index:9;pointer-events:none;white-space:pre";
+    document.body.appendChild(el);
+    return el;
+  })();
+  const dbg = { type: "-", down: 0, move: 0, up: 0, cancel: 0, captured: "-", from: "-", to: "-" };
+
+  function paintDebug() {
+    if (!dbgEl) return;
+    dbgEl.textContent = [
+      `type       ${dbg.type}`,
+      `down/up    ${dbg.down} / ${dbg.up}`,
+      `move       ${dbg.move}`,
+      `cancel     ${dbg.cancel}`,
+      `captured   ${dbg.captured}`,
+      `drag       ${dbg.from} -> ${dbg.to}`,
+      `touch-act  ${getComputedStyle(svgPlay).touchAction}`,
+    ].join("\n");
+  }
+
+  function buildPlayBoard() {
+    layerLines.replaceChildren();
+    layerHits.replaceChildren();
+
+    previewEl = document.createElementNS(NS, "line");
+    previewEl.setAttribute("class", "line-preview hidden");
+
+    POS.forEach((p, i) => {
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("cx", p.x);
+      c.setAttribute("cy", p.y);
+      c.setAttribute("r", NODE_R);
+      c.setAttribute("class", "node");
+      c.dataset.index = String(i);
+      nodeEls.push(c);
+      layerNodes.appendChild(c);
+    });
+
+    svgPlay.replaceChildren(layerLines, layerHits, previewEl, layerNodes);
+  }
+
+  function renderPlay() {
+    // Only the line layers are rebuilt; the nodes and the preview element keep
+    // their identity, and the gesture is captured by <svg> itself.
+    layerLines.replaceChildren();
+    layerHits.replaceChildren();
+    userEdges.forEach((key) => {
+      const [a, b] = key.split("-").map(Number);
+      const l = document.createElementNS(NS, "line");
+      l.setAttribute("x1", POS[a].x);
+      l.setAttribute("y1", POS[a].y);
+      l.setAttribute("x2", POS[b].x);
+      l.setAttribute("y2", POS[b].y);
+      let cls = "line-drawn";
+      if (isChecked) cls = strokeIsCorrect(key) ? "line-good" : "line-wrong";
+      l.setAttribute("class", cls);
+      layerLines.appendChild(l);
+
+      // Tappable marker above the visible line, below the nodes.
+      const h = document.createElementNS(NS, "line");
+      h.setAttribute("x1", POS[a].x);
+      h.setAttribute("y1", POS[a].y);
+      h.setAttribute("x2", POS[b].x);
+      h.setAttribute("y2", POS[b].y);
+      h.setAttribute("class", "line-hit");
+      layerHits.appendChild(h);
+    });
+    paintNodes();
+    paintPreview();
+    updateProgress();
+  }
+
+  function paintNodes() {
+    const hover = dragStart !== null ? hoverNode : null;
+    nodeEls.forEach((el, i) => {
+      el.setAttribute("class", "node" + (hover === i && dragStart !== i ? " hover" : ""));
+    });
+  }
+
+  function paintPreview() {
+    if (!previewEl) return;
+    if (dragStart === null) {
+      previewEl.setAttribute("class", "line-preview hidden");
+      return;
+    }
+    const from = POS[dragStart];
+    const to = hoverNode !== null ? POS[hoverNode] : dragPos || from;
+    previewEl.setAttribute("x1", from.x);
+    previewEl.setAttribute("y1", from.y);
+    previewEl.setAttribute("x2", to.x);
+    previewEl.setAttribute("y2", to.y);
+    previewEl.setAttribute("class", "line-preview");
+  }
+
+  // Nearest node within a finger-friendly radius; null when the point is open
+  // board. Replaces elementFromPoint so the result does not depend on which
+  // SVG child happens to be under the fingertip.
+  function nodeAt(p) {
+    let best = null;
+    let bestD = SNAP_R;
+    POS.forEach((q, i) => {
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d <= bestD) { bestD = d; best = i; }
+    });
+    return best;
+  }
+
+  function distToSegment(p, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  }
+
+  function strokeAt(p) {
+    let best = null;
+    let bestD = ERASE_R;
+    userEdges.forEach((key) => {
+      const [a, b] = key.split("-").map(Number);
+      const d = distToSegment(p, POS[a], POS[b]);
+      if (d <= bestD) { bestD = d; best = key; }
+    });
+    return best;
+  }
+
+  function updateProgress() {
+    progressEl.textContent = t("progress", { n: unitsOf(userEdges).size, total: targetEdges.size });
+  }
+
+  function generatePattern() {
+    // Build the target in canonical form so a long stroke and the shorter
+    // strokes that share its nodes are the same pattern.
+    const set = new Set();
+    let guard = 0;
+    while (set.size < 6 && guard < 5000) {
+      guard++;
+      const a = Math.floor(Math.random() * (COLS * ROWS));
+      const b = Math.floor(Math.random() * (COLS * ROWS));
+      if (a === b) continue;
+      primitiveEdges(a, b).forEach((unit) => set.add(unit));
+    }
+    targetEdges = set;
+    userEdges = [];
+    hideToast();
+    dragStart = null;
+    dragPos = null;
+    hoverNode = null;
+    isChecked = false;
+    renderExample();
+    renderPlay();
+  }
+
+  function removeStroke(key) {
+    userEdges = userEdges.filter((k) => k !== key);
+    isChecked = false;
+    hideToast();
+    beep(440, 0.05);
+    renderPlay();
+  }
+
+  function completeEdge(a, b) {
+    const key = edgeKey(a, b);
+    isChecked = false;
+    hideToast();
+    if (userEdges.includes(key)) {
+      // Already drawn: dragging over it again changes nothing. Erase by tapping
+      // the line itself.
+      beep(440, 0.05);
+      renderPlay();
+      return;
+    }
+    userEdges.push(key);
+    beep(660, 0.05);
+    renderPlay();
+    const units = unitsOf(userEdges);
+    if (units.size === targetEdges.size && [...targetEdges].every((k) => units.has(k))) {
+      setTimeout(checkPattern, 200);
+    }
+  }
+
+  function checkPattern() {
+    const units = unitsOf(userEdges);
+    const extra = [...units].filter((k) => !targetEdges.has(k)).length;
+    const missing = [...targetEdges].filter((k) => !units.has(k)).length;
+    const ok = extra === 0 && missing === 0;
+    isChecked = true;
+    renderPlay();
+    if (ok) {
+      beep(523, 0.1); setTimeout(() => beep(659, 0.1), 110); setTimeout(() => beep(784, 0.15), 220);
+      showToast(t("toastOk"), "ok");
+    } else {
+      beep(220, 0.12, "square", 0.08);
+      showToast(t("toastBad", { wrong: extra, missing }), "bad");
+    }
+  }
+
+  // A node press starts a drag. Edges are only created by dragging from one
+  // node and releasing on another; a plain tap does nothing.
+  function startDrag(i) {
+    dragStart = i;
+    dragPos = POS[i];
+    hoverNode = null;
+    beep(660, 0.05);
+    paintNodes();
+    paintPreview();
+  }
+
+  function resetGesture() {
+    dragStart = null;
+    dragPos = null;
+    hoverNode = null;
+    paintNodes();
+    paintPreview();
+  }
+
+  // Drag, tap and cancel all run through the <svg> that owns the pointer
+  // capture, so they keep working no matter what the line layers look like.
+  function onPointerDown(e) {
+    if (activePointer !== null) return;                 // one finger at a time
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const p = svgPoint(e.clientX, e.clientY);
+    activePointer = { id: e.pointerId, x: p.x, y: p.y, moved: false };
+    dbg.type = e.pointerType;
+    dbg.down += 1;
+    dbg.captured = "-";
+    try {
+      svgPlay.setPointerCapture(e.pointerId);
+      dbg.captured = "yes";
+    } catch (err) {
+      dbg.captured = "no";
+    }
+    if (e.cancelable) e.preventDefault();
+    const i = nodeAt(p);
+    if (i !== null) startDrag(i);
+    paintDebug();
+  }
+
+  function onPointerMove(e) {
+    const active = activePointer;
+    if (!active || e.pointerId !== active.id) return;
+    const p = svgPoint(e.clientX, e.clientY);
+    dbg.move += 1;
+    if (!active.moved && Math.hypot(p.x - active.x, p.y - active.y) > TAP_SLOP) active.moved = true;
+    if (dragStart === null) { paintDebug(); return; }
+    dragPos = p;
+    const hover = nodeAt(p);
+    if (hover !== hoverNode) {
+      hoverNode = hover;
+      paintNodes();
+    }
+    dbg.from = String(dragStart);
+    dbg.to = hover === null ? "open" : String(hover);
+    paintPreview();
+    paintDebug();
+  }
+
+  function onPointerEnd(e, cancelled) {
+    const active = activePointer;
+    if (!active || e.pointerId !== active.id) return;
+    activePointer = null;
+    if (cancelled) dbg.cancel += 1; else dbg.up += 1;
+    paintDebug();
+    try { svgPlay.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
+    if (cancelled) { resetGesture(); return; }
+
+    const p = svgPoint(e.clientX, e.clientY);
+    const released = nodeAt(p);       // the release point snaps, too
+    const from = dragStart;
+    dragStart = null;
+    dragPos = null;
+    hoverNode = null;
+
+    if (from !== null) {
+      if (released !== null && released !== from) {
+        completeEdge(from, released);
+      } else {
+        paintNodes();          // plain tap on a node: nothing to draw
+        paintPreview();
+      }
+      return;
+    }
+    // A gesture that never grabbed a node is a tap: erase the line under it.
+    if (!active.moved) {
+      const key = strokeAt(p);
+      if (key !== null) { removeStroke(key); return; }
+    }
+    paintNodes();
+    paintPreview();
+  }
+
+  function svgPoint(clientX, clientY) {
+    const ctm = svgPlay.getScreenCTM();
+    if (!ctm) return { x: clientX, y: clientY };
+    const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+    return { x: p.x, y: p.y };
+  }
+
+  svgPlay.addEventListener("pointerdown", onPointerDown);
+  svgPlay.addEventListener("pointermove", onPointerMove);
+  svgPlay.addEventListener("pointerup", (e) => onPointerEnd(e, false));
+  svgPlay.addEventListener("pointercancel", (e) => onPointerEnd(e, true));
+  svgPlay.addEventListener("lostpointercapture", () => {
+    if (activePointer !== null) { activePointer = null; resetGesture(); }
+  });
+  svgPlay.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // iOS Safari has historically ignored touch-action on inline SVG children.
+  // Cancel the touch defaults explicitly so the board never turns into a pan
+  // or a long-press callout. Only where Pointer Events exist, so an ancient
+  // browser still keeps the page scrollable instead of dead.
+  if (window.PointerEvent) {
+    const stopTouch = (e) => { if (e.cancelable) e.preventDefault(); };
+    svgPlay.addEventListener("touchstart", stopTouch, { passive: false });
+    svgPlay.addEventListener("touchmove", stopTouch, { passive: false });
+  }
+
+  document.getElementById("newBtn").addEventListener("click", generatePattern);
+  document.getElementById("undoBtn").addEventListener("click", () => {
+    userEdges.pop();
+    hideToast();
+    resetGesture();
+    isChecked = false;
+    renderPlay();
+  });
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    userEdges = [];
+    hideToast();
+    resetGesture();
+    isChecked = false;
+    renderPlay();
+  });
+
+  document.getElementById("checkBtn").addEventListener("click", checkPattern);
+
+  // No <form>: iframe sandbox has no allow-forms and CSP form-action 'none'.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); generatePattern(); }
+    if (e.key === "Escape") resetGesture();
+  });
+
+  // i18n
+  document.documentElement.lang = LANG;
+  document.title = t("title");
+  for (const el of document.querySelectorAll("[data-i18n]")) {
+    el.textContent = t(el.dataset.i18n);
+  }
+
+  buildPlayBoard();
+  generatePattern();
+  paintDebug();
+})();
+</script>
+</body>
+</html>
