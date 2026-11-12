@@ -13,6 +13,8 @@
   }
   h1 { margin: 0; font-size: 1.35rem; color: #f59e0b; }
   .hud { display: flex; gap: 18px; font-size: 0.95rem; background: #1e293b; padding: 8px 16px; border-radius: 999px; }
+  .hud .timer { color: #f59e0b; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .hud .timer.over { color: #ef4444; }
   .grid {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
     width: min(92vw, 360px); height: min(92vw, 360px);
@@ -27,6 +29,22 @@
     padding: 12px 24px; border-radius: 12px; border: none;
     background: #f59e0b; color: #090d16; font-weight: 700; font-size: 1rem; cursor: pointer;
   }
+  button.ghost {
+    background: transparent; color: #cbd5e1; border: 1px solid #475569;
+  }
+  .hidden { display: none !important; }
+  .overlay {
+    position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
+    padding: 18px; background: rgba(9, 13, 22, 0.9);
+  }
+  .card-panel {
+    width: min(360px, 100%); display: grid; gap: 14px; padding: 22px;
+    border: 1px solid #334155; border-radius: 18px; background: #111a2e; text-align: center;
+  }
+  .card-panel h2 { margin: 0; font-size: 1.05rem; letter-spacing: 0.06em; text-transform: uppercase; }
+  .card-panel .big { margin: 0; font-size: 2rem; font-weight: 800; color: #f59e0b; }
+  .durations { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .durations button { padding: 10px 14px; font-size: 0.9rem; }
 </style>
 </head>
 <body>
@@ -34,60 +52,177 @@
   <div style="font-size:0.78rem;color:#94a3b8;max-width:340px;text-align:center;">4x4 arcade icon memory card matching puzzle game</div>
   <div class="hud">
     <span id="moves">Moves: 0</span>
-    <span id="pairs">Pairs: 0 / 8</span>
+    <span id="pairs">Pairs: 0</span>
+    <span class="timer" id="timer">0:00</span>
   </div>
   <div class="grid" id="grid"></div>
   <button id="restartBtn">↻ Play Again</button>
+
+  <div class="overlay" id="setup">
+    <div class="card-panel">
+      <h2>How long do you want to play?</h2>
+      <div class="durations" id="durations"></div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="summary">
+    <div class="card-panel">
+      <h2>Time's up</h2>
+      <p class="big" id="summaryPairs">Pairs: 0</p>
+      <div class="durations">
+        <button id="againBtn" type="button">Play again</button>
+        <button id="changeBtn" type="button" class="ghost">Change time</button>
+      </div>
+    </div>
+  </div>
 <script>
 (() => {
-  const icons = ['🚀','👾','⚡','💎','🔥','🌟','🎲','🎯'];
+  const ICONS = ['🚀','👾','⚡','💎','🔥','🌟','🎲','🎯'];
+  const DURATIONS = [1, 2, 5, 10];
   const grid = document.getElementById('grid');
   const movesEl = document.getElementById('moves');
   const pairsEl = document.getElementById('pairs');
-  let deck = [], open = [], moves = 0, matched = 0, locked = false;
+  const timerEl = document.getElementById('timer');
+  const setupEl = document.getElementById('setup');
+  const summaryEl = document.getElementById('summary');
+  const summaryPairs = document.getElementById('summaryPairs');
 
-  function start() {
-    deck = [...icons, ...icons].sort(() => Math.random() - 0.5).map((icon, id) => ({ id, icon, matched: false }));
-    open = []; moves = 0; matched = 0; locked = false;
-    render();
+  let deck = [], open = [], moves = 0, pairs = 0, locked = false;
+  let phase = 'idle';   // idle | playing | timeup | over
+  let minutes = 2;
+  let endsAt = 0;
+  let clockId = null;
+
+  function formatClock(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+  }
+
+  function paintHud() {
+    movesEl.textContent = 'Moves: ' + moves;
+    pairsEl.textContent = 'Pairs: ' + pairs;
+    timerEl.textContent = formatClock(endsAt - performance.now());
+  }
+
+  function stopClock() {
+    clearInterval(clockId);
+    clockId = null;
+  }
+
+  // Fresh deck for the next run; pairs are counted per session.
+  function nextDeck() {
+    deck = [...ICONS, ...ICONS]
+      .sort(() => Math.random() - 0.5)
+      .map((icon, id) => ({ id, icon, matched: false }));
+    open = [];
+    locked = false;
   }
 
   function render() {
-    movesEl.textContent = 'Moves: ' + moves;
-    pairsEl.textContent = 'Pairs: ' + matched + ' / 8';
     grid.innerHTML = '';
-    deck.forEach((c, idx) => {
+    deck.forEach((card, idx) => {
       const btn = document.createElement('div');
-      const isOpen = open.includes(idx) || c.matched;
+      const isOpen = open.includes(idx) || card.matched;
       btn.className = 'card' + (isOpen ? ' revealed' : '');
-      btn.textContent = isOpen ? c.icon : '❓';
+      btn.textContent = isOpen ? card.icon : '❓';
       btn.onclick = () => flip(idx);
       grid.appendChild(btn);
     });
   }
 
+  function startSession(chosenMinutes) {
+    minutes = chosenMinutes;
+    moves = 0;
+    pairs = 0;
+    phase = 'playing';
+    endsAt = performance.now() + minutes * 60000;
+    timerEl.classList.remove('over');
+    setupEl.classList.add('hidden');
+    summaryEl.classList.add('hidden');
+    nextDeck();
+    render();
+    paintHud();
+    stopClock();
+    clockId = setInterval(() => {
+      if (phase !== 'playing') return;
+      paintHud();
+      if (performance.now() >= endsAt) endTime();
+    }, 250);
+  }
+
+  // No new deck after the clock dies, but the board on screen is always
+  // finishable: the summary appears when its last pair is matched.
+  function endTime() {
+    if (phase !== 'playing') return;
+    stopClock();
+    phase = 'timeup';
+    timerEl.textContent = '0:00';
+    timerEl.classList.add('over');
+    if (deck.length && deck.every((card) => card.matched)) showSummary();
+  }
+
+  function showSummary() {
+    phase = 'over';
+    stopClock();
+    summaryPairs.textContent = 'Pairs: ' + pairs;
+    summaryEl.classList.remove('hidden');
+  }
+
+  function showSetup() {
+    phase = 'idle';
+    stopClock();
+    timerEl.textContent = '0:00';
+    timerEl.classList.remove('over');
+    setupEl.classList.remove('hidden');
+    summaryEl.classList.add('hidden');
+  }
+
   function flip(idx) {
     if (locked || open.includes(idx) || deck[idx].matched) return;
+    if (phase === 'playing' && performance.now() >= endsAt) endTime();
+    if (phase !== 'playing' && phase !== 'timeup') return;
+
     open.push(idx);
     render();
-    if (open.length === 2) {
-      moves++;
-      locked = true;
-      const [a, b] = open;
-      if (deck[a].icon === deck[b].icon) {
-        deck[a].matched = deck[b].matched = true;
-        matched++;
+    if (open.length < 2) return;
+
+    moves += 1;
+    locked = true;
+    const [a, b] = open;
+    if (deck[a].icon === deck[b].icon) {
+      deck[a].matched = deck[b].matched = true;
+      pairs += 1;
+      open = [];
+      locked = false;
+      paintHud();
+      render();
+      if (deck.every((card) => card.matched)) {
+        if (phase === 'timeup') setTimeout(showSummary, 450);
+        else setTimeout(() => { if (phase === 'playing') { nextDeck(); render(); } }, 650);
+      }
+    } else {
+      setTimeout(() => {
         open = [];
         locked = false;
+        paintHud();
         render();
-      } else {
-        setTimeout(() => { open = []; locked = false; render(); }, 600);
-      }
+      }, 600);
     }
   }
 
-  document.getElementById('restartBtn').onclick = start;
-  start();
+  DURATIONS.forEach((value) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = value + ' min';
+    button.addEventListener('click', () => startSession(value));
+    document.getElementById('durations').appendChild(button);
+  });
+
+  document.getElementById('restartBtn').addEventListener('click', () => startSession(minutes));
+  document.getElementById('againBtn').addEventListener('click', () => startSession(minutes));
+  document.getElementById('changeBtn').addEventListener('click', showSetup);
+
+  showSetup();
 })();
 </script>
 </body>
