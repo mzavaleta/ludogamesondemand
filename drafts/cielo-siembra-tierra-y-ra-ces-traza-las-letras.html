@@ -76,14 +76,17 @@
   .bigscore{font-size:52px;font-weight:900;color:#6c5ce7;line-height:1;margin:8px 0 2px;
     text-shadow:0 3px 0 #e6e1ff;}
   .btnrow{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:6px;}
+  .times{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:10px 0 4px;}
+  .btn.time{padding:12px 18px;font-size:15px;}
 </style>
 </head>
 <body>
 <div id="app">
   <header id="hud">
     <div class="chip"><span class="k">Letra</span><b id="hud-letter">A</b></div>
+    <div class="chip"><span class="k">Hechas</span><b id="hud-solved">0</b></div>
+    <div class="chip"><span class="k">Tiempo</span><b id="hud-time">0:00</b></div>
     <div class="chip"><span class="k">Puntos</span><b id="hud-score">0</b></div>
-    <div class="chip"><span class="k">Avance</span><b id="hud-prog">1/54</b></div>
     <button id="btn-reset" type="button" aria-label="Reiniciar">⟲</button>
   </header>
   <main id="stage"><canvas id="game"></canvas></main>
@@ -92,30 +95,24 @@
 <div id="overlay" class="overlay">
   <div class="panel">
     <h1>Traza las Letras ✏️</h1>
-    <p class="sub">Método <b>cielo · siembra · tierra</b></p>
-    <div class="legend">
-      <div><span class="dot sky"></span> Cielo — donde suben las letras</div>
-      <div><span class="dot grass"></span> Siembra — la mitad de la letra</div>
-      <div><span class="dot ground"></span> Tierra — donde se apoyan</div>
+    <p class="sub">¿Cuánto tiempo quieres jugar?</p>
+    <div class="times" id="times">
+      <button type="button" class="btn time" data-min="1">1 min</button>
+      <button type="button" class="btn time" data-min="2">2 min</button>
+      <button type="button" class="btn time" data-min="5">5 min</button>
+      <button type="button" class="btn time" data-min="10">10 min</button>
     </div>
-    <p class="how">Arrastra el dedo desde el punto verde y sigue el caminito de cada trazo.<br>
-      También puedes usar las <b>flechas</b> o <b>WASD</b>.</p>
-    <p class="tip">El juego va <b>intercalando</b>: primero <b class="pill">A</b>, luego <b class="pill lo">a</b>,
-      después <b class="pill">B</b>, luego <b class="pill lo">b</b>… ¡Las minúsculas viven entre
-      <b>siembra</b> y <b>tierra</b>!</p>
-    <button id="btn-start" type="button" class="btn">¡Jugar!</button>
-    <p class="sub" style="margin-top:12px;font-size:11.5px;opacity:.75">Toca en cualquier parte para empezar</p>
   </div>
 </div>
 
 <div id="win" class="overlay hidden">
   <div class="panel">
-    <h1 id="win-title">¡Lo lograste! 🌟</h1>
-    <p class="sub" id="win-sub">Escribiste un montón de letras</p>
+    <h1 id="win-title">¡Se acabó el tiempo! ⏰</h1>
+    <p class="sub" id="win-sub">Trazaste varias letras</p>
     <div class="bigscore" id="win-score">0</div>
-    <p class="sub">puntos</p>
+    <p class="sub">letras</p>
     <div class="btnrow">
-      <button id="btn-next" type="button" class="btn">Seguir</button>
+      <button id="btn-next" type="button" class="btn">Cambiar tiempo</button>
       <button id="btn-again" type="button" class="btn purple">Jugar otra vez</button>
     </div>
   </div>
@@ -325,9 +322,6 @@ for(let i = 0; i < UPPER.length; i++){
   SEQUENCE.push(LOWER[i]);
 }
 
-/* Letras completadas por ronda (20 = 10 pares mayúscula/minúscula) */
-const ROUND_SIZE = 20;
-
 const FALLBACK_STROKE = [[0.10,1],[0.90,1]];
 
 function isPoint(p){
@@ -460,12 +454,15 @@ const state = {
   phase: 'start',          // start | play | celebrate | win
   score: 0,
   letterIdx: 0,            // índice sobre SEQUENCE (intercalada)
-  strokeIdx: 0,
-  progress: 0,
+  strokes: [],             // trazos de la letra actual
+  cover: [],               // puntos ya trazados por trazo (Uint8Array)
+  covered: [],             // cuántos puntos lleva cada trazo
+  lastPaint: null,         // último punto tocado (para cubrir trazos rápidos)
   lastTick: 0,
   tracing: false,
+  timeUp: false,
+  solved: 0,
   celebrateT: 0,
-  roundCount: 0,
   shake: 0,
   particles: [],
   floats: [],
@@ -475,13 +472,31 @@ const state = {
 
 const hudLetter = document.getElementById('hud-letter');
 const hudScore  = document.getElementById('hud-score');
-const hudProg   = document.getElementById('hud-prog');
+const hudSolved = document.getElementById('hud-solved');
+const hudTime   = document.getElementById('hud-time');
 const overlay   = document.getElementById('overlay');
 const winOverlay= document.getElementById('win');
 const winTitle  = document.getElementById('win-title');
 const winSub    = document.getElementById('win-sub');
 const winScore  = document.getElementById('win-score');
-const btnNext   = document.getElementById('btn-next');
+
+/* Sesión por tiempo */
+let sessionMinutes = 2;
+let endsAt = 0;
+let clockId = null;
+
+function formatClock(ms){
+  const total = Math.max(0, Math.ceil(ms/1000));
+  return Math.floor(total/60) + ':' + String(total%60).padStart(2,'0');
+}
+
+function stopClock(){
+  if(clockId){ clearInterval(clockId); clockId = null; }
+}
+
+function paintClock(){
+  hudTime.textContent = formatClock(endsAt - performance.now());
+}
 
 function currentLetter(){
   return SEQUENCE[Math.min(state.letterIdx, SEQUENCE.length-1)];
@@ -498,7 +513,30 @@ function updateHUD(){
   hudLetter.textContent = ch;
   hudLetter.style.color = lo ? '#ff8c42' : '#2c3e50';
   hudScore.textContent  = state.score;
-  hudProg.textContent   = Math.min(state.letterIdx+1, SEQUENCE.length) + '/' + SEQUENCE.length;
+  hudSolved.textContent = state.solved;
+}
+
+/* Prepara la cobertura de trazos de la letra actual. */
+function prepareLetter(){
+  const strokes = curStrokes();
+  state.strokes = strokes;
+  state.cover = strokes.map(function(pts){ return new Uint8Array(pts.length); });
+  state.covered = strokes.map(function(){ return 0; });
+  state.lastPaint = null;
+  state.lastTick = 0;
+  state.tracing = false;
+}
+
+function strokeDone(s){
+  const pts = state.strokes[s];
+  return !!pts && state.covered[s] >= pts.length;
+}
+
+function firstIncomplete(){
+  for(let s=0;s<state.strokes.length;s++){
+    if(!strokeDone(s)) return s;
+  }
+  return -1;
 }
 
 /* ============================================================
@@ -543,63 +581,87 @@ function wrongFeedback(){
    ============================================================ */
 function tolPx(){ return Math.max(16, letterH * 0.12); }
 
-function tryStart(x, y){
-  const strokes = curStrokes();
-  if(state.strokeIdx >= strokes.length) return false;
-  const pts = strokes[state.strokeIdx];
-  if(!pts || !pts.length) return false;
+/* Cualquier punto de cualquier trazo sirve como entrada: no hay orden ni
+   sentido obligatorio. El trazo se pinta donde pasa el dedo. */
+function nearestStrokePoint(x, y, maxDist){
+  let best = null, bestD = maxDist;
+  for(let s=0;s<state.strokes.length;s++){
+    if(strokeDone(s)) continue;
+    const pts = state.strokes[s];
+    for(let i=0;i<pts.length;i++){
+      const sp = toScreen(pts[i]);
+      const d = Math.hypot(sp.x - x, sp.y - y);
+      if(d < bestD){ bestD = d; best = { s: s, i: i }; }
+    }
+  }
+  return best;
+}
+
+function distToSegment(px, py, ax, ay, bx, by){
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx*dx + dy*dy;
+  let t = len2 ? ((px-ax)*dx + (py-ay)*dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t*dx), py - (ay + t*dy));
+}
+
+function paintAt(x, y){
   const tol = tolPx();
+  const prev = state.lastPaint || { x: x, y: y };
+  const wasDone = state.strokes.map(function(_, s){ return strokeDone(s); });
+  let marked = 0;
 
-  const lo = Math.max(0, state.progress - 6);
-  const hi = Math.min(pts.length-1, state.progress + 20);
+  // El dedo pinta toda línea que toca: sin trazo activo ni dirección fija.
+  for(let s=0;s<state.strokes.length;s++){
+    if(wasDone[s]) continue;
+    const pts = state.strokes[s];
+    const cover = state.cover[s];
+    for(let i=0;i<pts.length;i++){
+      const sp = toScreen(pts[i]);
+      // Cubre lo que pasa entre dos eventos: un trazo rápido no deja huecos.
+      const d = distToSegment(sp.x, sp.y, prev.x, prev.y, x, y);
+      if(d <= tol && !cover[i]){ cover[i] = 1; state.covered[s]++; marked++; }
+    }
+  }
+  state.lastPaint = { x: x, y: y };
 
-  let best = -1, bestD = Infinity;
-  for(let i=lo;i<=hi;i++){
-    const sp = toScreen(pts[i]);
-    const d = Math.hypot(sp.x - x, sp.y - y);
-    if(d < bestD){ bestD = d; best = i; }
+  if(marked > 0){
+    const now = performance.now();
+    if(now - state.lastTick > 90){ state.lastTick = now; sfx.tick(); }
   }
-  if(bestD < tol * 1.8){
-    state.tracing  = true;
-    state.progress = Math.max(best, state.progress);
-    tone(900, 0.05, 'sine', 0.06);
-    return true;
+
+  const justDone = [];
+  for(let s=0;s<state.strokes.length;s++){
+    if(!wasDone[s] && state.covered[s] >= state.strokes[s].length) justDone.push(s);
   }
-  return false;
+  if(!justDone.length) return;
+
+  state.tracing = false;
+  justDone.forEach(function(s){ awardStroke(s); });
+
+  const next = firstIncomplete();
+  if(next < 0) completeLetter();
+  else if(state.pointer.key) snapKeyboardCursor();
+}
+
+function tryStart(x, y){
+  if(state.phase !== 'play' && state.phase !== 'timeup') return false;
+  const hit = nearestStrokePoint(x, y, tolPx() * 1.8);
+  if(!hit) return false;
+  state.tracing = true;
+  state.lastPaint = { x: x, y: y };
+  tone(900, 0.05, 'sine', 0.06);
+  paintAt(x, y);
+  return true;
 }
 
 function traceAt(x, y){
   if(!state.tracing) return;
-  const strokes = curStrokes();
-  const pts = strokes[state.strokeIdx];
-  if(!pts || !pts.length) return;
-
-  const tol = tolPx();
-  const start = Math.min(state.progress, pts.length-1);
-  const end   = Math.min(pts.length-1, state.progress + 34);
-
-  let best = start, bestD = Infinity;
-  for(let i=start;i<=end;i++){
-    const sp = toScreen(pts[i]);
-    const d = Math.hypot(sp.x - x, sp.y - y);
-    if(d < bestD){ bestD = d; best = i; }
-  }
-
-  if(bestD < tol){
-    if(best > state.progress){
-      state.progress = best;
-      if(state.progress - state.lastTick > 20){
-        state.lastTick = state.progress;
-        sfx.tick();
-      }
-    }
-    if(state.progress >= pts.length - 2) completeStroke();
-  }
+  paintAt(x, y);
 }
 
-function completeStroke(){
-  const strokes = curStrokes();
-  const pts = strokes[state.strokeIdx];
+function awardStroke(s){
+  const pts = state.strokes[s];
   if(!pts || !pts.length) return;
   const endP = toScreen(pts[pts.length-1]);
 
@@ -610,24 +672,13 @@ function completeStroke(){
   state.score += 15;
   addFloat(endP.x, endP.y - 24, '+15', '#ff7f50');
   updateHUD();
-
-  state.strokeIdx++;
-  state.progress = 0;
-  state.lastTick = 0;
-  state.tracing  = false;
-
-  if(state.strokeIdx >= strokes.length){
-    completeLetter();
-  }else if(state.pointer.key){
-    snapKeyboardCursor();
-  }
 }
 
 function completeLetter(){
   state.phase = 'celebrate';
   state.celebrateT = 1.15;
   state.score += 45;
-  state.roundCount++;
+  state.solved++;
   updateHUD();
 
   const ch = currentLetter();
@@ -641,14 +692,12 @@ function completeLetter(){
 }
 
 function nextLetter(){
-  state.letterIdx++;
-  state.strokeIdx = 0;
-  state.progress  = 0;
-  state.lastTick  = 0;
-  state.tracing   = false;
+  // Con tiempo agotado ya no aparece otra letra: se cierra la sesión.
+  if(state.timeUp){ endRound(); return; }
 
-  if(state.letterIdx >= SEQUENCE.length){ endRound(true); return; }
-  if(state.roundCount >= ROUND_SIZE){ endRound(false); return; }
+  state.letterIdx++;
+  if(state.letterIdx >= SEQUENCE.length) state.letterIdx = 0;   // vuelta al inicio
+  prepareLetter();
 
   state.phase = 'play';
   updateHUD();
@@ -656,33 +705,34 @@ function nextLetter(){
   if(state.pointer.key) snapKeyboardCursor();
 }
 
-function endRound(isFinal){
+function endRound(){
   state.phase = 'win';
-  winScore.textContent = state.score;
-  winTitle.textContent = isFinal ? '¡Lo lograste! 🌟' : '¡Excelente trabajo! 🎉';
-  winSub.textContent   = isFinal
-    ? 'Escribiste el abecedario en mayúsculas y minúsculas'
-    : 'Completaste ' + Math.floor(ROUND_SIZE/2) + ' letras en sus dos formas';
-  btnNext.style.display = isFinal ? 'none' : 'inline-block';
+  stopClock();
+  paintClock();
+  winScore.textContent = state.solved;
+  winTitle.textContent = '¡Se acabó el tiempo! ⏰';
+  winSub.textContent   = state.solved + (state.solved === 1 ? ' letra · ' : ' letras · ') +
+    state.score + ' puntos';
   winOverlay.classList.remove('hidden');
   sfx.win();
-  speak(isFinal ? '¡Lo lograste!' : '¡Muy bien!');
+  speak('¡Muy bien!');
 }
 
 /* ============================================================
    KEYBOARD CURSOR
    ============================================================ */
 function snapKeyboardCursor(){
-  const strokes = curStrokes();
-  if(!strokes || state.strokeIdx >= strokes.length) return;
-  const st = strokes[state.strokeIdx];
-  if(!st || !st.length) return;
-  const p = toScreen(st[0]);
+  const s = firstIncomplete();
+  if(s < 0) return;
+  const pts = state.strokes[s];
+  if(!pts || !pts.length) return;
+  let i = 0;
+  while(i < pts.length && state.cover[s][i]) i++;
+  const p = toScreen(pts[Math.min(i, pts.length-1)]);
   state.pointer.x = p.x;
   state.pointer.y = p.y;
   state.pointer.active = true;
   state.pointer.key = true;
-  state.progress = 0;
   state.tracing = true;
 }
 
@@ -805,24 +855,13 @@ window.addEventListener('keydown', function(e){
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
 
   if(k === ' ' || k === 'enter'){
-    if(state.phase === 'start'){ unlockAudio(); startGame(); return; }
     if(state.phase === 'win'){ unlockAudio(); restartGame(); return; }
   }
   if(state.phase !== 'play') return;
   if(!KEYMAP[k]) return;
 
   if(!state.pointer.active || !state.pointer.key){
-    const strokes = curStrokes();
-    const st = strokes[state.strokeIdx];
-    if(st && st.length){
-      const sp = toScreen(st[0]);
-      state.pointer.x = sp.x;
-      state.pointer.y = sp.y;
-      state.pointer.active = true;
-      state.pointer.key = true;
-      state.progress = 0;
-      state.tracing = true;
-    }
+    snapKeyboardCursor();
   }
   keys.add(k);
 });
@@ -970,7 +1009,7 @@ function drawZones(){
 }
 
 function drawStrokes(){
-  const strokes = curStrokes();
+  const strokes = state.strokes;
   if(!strokes || !strokes.length) return;
 
   ctx.lineCap = 'round';
@@ -980,96 +1019,55 @@ function drawStrokes(){
   const thickGhost  = Math.max(4, letterH * 0.030);
   const dash = [letterH*0.032, letterH*0.042];
 
+  function paintRun(run){
+    if(run.length > 1){
+      ctx.strokeStyle = '#ff7f50';
+      ctx.lineWidth = thickTraced;
+      ctx.shadowColor = 'rgba(255,127,80,.6)';
+      ctx.shadowBlur = letterH * 0.07;
+      strokePoly(run);
+      ctx.shadowBlur = 0;
+    }else if(run.length === 1){
+      const q = toScreen(run[0]);
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, thickTraced*0.5, 0, TAU);
+      ctx.fillStyle = '#ff7f50';
+      ctx.fill();
+    }
+  }
+
   for(let s=0;s<strokes.length;s++){
     const pts = strokes[s];
     if(!pts || pts.length < 2) continue;
 
-    if(s < state.strokeIdx){
+    if(strokeDone(s)){
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(126,205,126,.85)';
       ctx.lineWidth = thickTraced;
       strokePoly(pts);
+      continue;
+    }
 
-    }else if(s === state.strokeIdx){
-      ctx.setLineDash(dash);
-      ctx.strokeStyle = 'rgba(150,168,190,.75)';
-      ctx.lineWidth = thickGhost;
-      strokePoly(pts.slice(Math.max(0, state.progress)));
-      ctx.setLineDash([]);
+    // Guía punteada completa: se puede empezar por cualquier punto.
+    ctx.setLineDash(dash);
+    ctx.strokeStyle = 'rgba(150,168,190,.6)';
+    ctx.lineWidth = thickGhost;
+    strokePoly(pts);
+    ctx.setLineDash([]);
 
-      if(state.progress > 0){
-        const traced = pts.slice(0, Math.min(state.progress + 1, pts.length));
-        ctx.strokeStyle = '#ff7f50';
-        ctx.lineWidth = thickTraced;
-        ctx.shadowColor = 'rgba(255,127,80,.6)';
-        ctx.shadowBlur = letterH * 0.07;
-        strokePoly(traced);
-        ctx.shadowBlur = 0;
-
-        const head = toScreen(pts[clamp(state.progress, 0, pts.length-1)]);
-        ctx.beginPath();
-        ctx.arc(head.x, head.y, letterH*0.042, 0, TAU);
-        ctx.fillStyle = '#ffc09b';
-        ctx.fill();
+    const cover = state.cover[s];
+    let run = [];
+    for(let i=0;i<pts.length;i++){
+      if(cover[i]){
+        run.push(pts[i]);
+      }else{
+        paintRun(run);
+        run = [];
       }
-    }else{
-      ctx.setLineDash(dash);
-      ctx.strokeStyle = 'rgba(150,168,190,.42)';
-      ctx.lineWidth = thickGhost;
-      strokePoly(pts);
-      ctx.setLineDash([]);
     }
+    paintRun(run);
   }
 
-  for(let s=state.strokeIdx;s<strokes.length;s++){
-    const pts = strokes[s];
-    if(!pts || !pts.length) continue;
-    const p = toScreen(pts[0]);
-    const isCurrent = (s === state.strokeIdx);
-    const t = performance.now() / 1000;
-    const pulse = isCurrent ? 1 + 0.13*Math.sin(t*6) : 1;
-    const r = letterH * (isCurrent ? 0.062 : 0.045) * pulse;
-
-    if(isCurrent){
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r*1.85, 0, TAU);
-      ctx.fillStyle = 'rgba(46,204,113,.18)';
-      ctx.fill();
-    }
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, TAU);
-    ctx.fillStyle = isCurrent ? '#2ecc71' : 'rgba(160,180,200,.65)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.85)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.fillStyle = '#fff';
-    ctx.font = '800 ' + (r*1.25) + 'px -apple-system,Segoe UI,Roboto,sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(s+1), p.x, p.y + r*0.06);
-
-    if(isCurrent && state.progress === 0 && pts.length > 10){
-      const a = toScreen(pts[0]);
-      const b = toScreen(pts[Math.min(9, pts.length-1)]);
-      const ang = Math.atan2(b.y-a.y, b.x-a.x);
-      const d = r*2.6;
-      const ax = a.x + Math.cos(ang)*d;
-      const ay = a.y + Math.sin(ang)*d;
-      ctx.save();
-      ctx.translate(ax, ay);
-      ctx.rotate(ang);
-      ctx.beginPath();
-      ctx.moveTo(r*0.85, 0);
-      ctx.lineTo(-r*0.55, -r*0.72);
-      ctx.lineTo(-r*0.55, r*0.72);
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(46,204,113,.85)';
-      ctx.fill();
-      ctx.restore();
-    }
-  }
 }
 
 function drawParticles(){
@@ -1161,12 +1159,11 @@ function render(){
 function resetState(){
   state.score = 0;
   state.letterIdx = 0;
-  state.strokeIdx = 0;
-  state.progress = 0;
+  state.solved = 0;
+  state.timeUp = false;
   state.lastTick = 0;
   state.tracing = false;
   state.celebrateT = 0;
-  state.roundCount = 0;
   state.shake = 0;
   state.particles.length = 0;
   state.floats.length = 0;
@@ -1174,54 +1171,58 @@ function resetState(){
   state.pointer.active = false;
   state.pointer.key = false;
   keys.clear();
+  prepareLetter();
 }
 
-/* Idempotente: si ya está jugando, no hace nada.
-   El estado se marca PRIMERO para que varias llamadas seguidas
-   (pointerdown + touchstart + click) no rompan nada. */
-function startGame(){
-  if(state.phase === 'play') return;
-  state.phase = 'play';                 // marca antes de cualquier trabajo pesado
+function startSession(minutes){
+  sessionMinutes = minutes;
+  state.phase = 'play';
   try{
     unlockAudio();
     sfx.click();
     resetState();
     if(overlay)    overlay.classList.add('hidden');
     if(winOverlay) winOverlay.classList.add('hidden');
+    hudTime.style.color = '#2c3e50';
+    endsAt = performance.now() + minutes * 60000;
+    stopClock();
+    paintClock();
+    clockId = setInterval(function(){
+      if(state.phase === 'win'){ stopClock(); return; }
+      paintClock();
+      if(!state.timeUp && performance.now() >= endsAt) endTime();
+    }, 250);
     layout();
     updateHUD();
     speak(currentLetter());
     if(state.pointer.key) snapKeyboardCursor();
   }catch(err){
-    console.error('startGame', err);
+    console.error('startSession', err);
   }
 }
 
-function restartGame(){
-  state.phase = 'play';
-  try{
-    unlockAudio();
-    sfx.click();
-    resetState();
-    if(winOverlay) winOverlay.classList.add('hidden');
-    if(overlay)    overlay.classList.add('hidden');
-    layout();
-    updateHUD();
-    speak(currentLetter());
-  }catch(err){ console.error('restartGame', err); }
+/* Se acabó el tiempo: no aparece otra letra, pero la que está en pantalla se
+   puede terminar. La sesión sólo cierra sola si la letra ya estaba hecha. */
+function endTime(){
+  state.timeUp = true;
+  paintClock();
+  hudTime.style.color = '#ff4d6d';
+  if(state.phase === 'celebrate'){ endRound(); return; }
+  sfx.wrong();
+  showToast('¡Tiempo! Termina esta letra');
 }
 
-function continueRound(){
-  state.phase = 'play';
-  try{
-    unlockAudio();
-    sfx.click();
-    if(winOverlay) winOverlay.classList.add('hidden');
-    state.roundCount = 0;
-    updateHUD();
-    speak(currentLetter());
-    if(state.pointer.key) snapKeyboardCursor();
-  }catch(err){ console.error('continueRound', err); }
+function showSetup(){
+  stopClock();
+  state.phase = 'start';
+  if(winOverlay) winOverlay.classList.add('hidden');
+  if(overlay)    overlay.classList.remove('hidden');
+  hudTime.textContent = '0:00';
+  hudTime.style.color = '#2c3e50';
+}
+
+function restartGame(){
+  startSession(sessionMinutes);
 }
 
 /* ============================================================
@@ -1311,56 +1312,15 @@ function boot(){
   }, { passive:false });
 
   /* ---- BOTONES ---- */
-  bindTap(document.getElementById('btn-start'), startGame);
+  document.querySelectorAll('#times [data-min]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      try{ unlockAudio(); }catch(_){}
+      startSession(Number(btn.dataset.min));
+    });
+  });
   bindTap(document.getElementById('btn-again'), restartGame);
-  bindTap(document.getElementById('btn-next'),  continueRound);
+  bindTap(document.getElementById('btn-next'),  showSetup);
   bindTap(document.getElementById('btn-reset'), function(){ restartGame(); });
-
-  /* ---- TOCAR EN CUALQUIER PARTE DEL OVERLAY INICIA EL JUEGO ---- */
-  let ovStartPt = null;
-
-  function ovPoint(e){
-    if(e.touches && e.touches.length) return e.touches[0];
-    if(e.changedTouches && e.changedTouches.length) return e.changedTouches[0];
-    return e;
-  }
-
-  function ovDown(e){
-    if(state.phase !== 'start') return;
-    const p = ovPoint(e);
-    if(p && typeof p.clientX === 'number'){
-      ovStartPt = { x: p.clientX, y: p.clientY };
-    }else{
-      ovStartPt = null;
-    }
-    try{ unlockAudio(); }catch(_){}
-  }
-
-  function ovUp(e){
-    if(state.phase !== 'start') return;
-    const p = ovPoint(e);
-    if(ovStartPt && p && typeof p.clientX === 'number'){
-      const d = Math.hypot(p.clientX - ovStartPt.x, p.clientY - ovStartPt.y);
-      if(d > 18) return;              // fue un scroll, no un toque
-    }
-    if(e && e.cancelable){ try{ e.preventDefault(); }catch(_){} }
-    startGame();
-  }
-
-  overlay.addEventListener('pointerdown', ovDown, { passive:true });
-  overlay.addEventListener('touchstart',  ovDown, { passive:true });
-  overlay.addEventListener('mousedown',   ovDown, { passive:true });
-
-  overlay.addEventListener('pointerup',   ovUp, { passive:false });
-  overlay.addEventListener('touchend',    ovUp, { passive:false });
-  overlay.addEventListener('mouseup',     ovUp, { passive:false });
-  overlay.addEventListener('click',       ovUp, { passive:false });
-
-  /* ---- Red de seguridad global: cualquier click en fase "start" arranca ---- */
-  document.addEventListener('click', function(ev){
-    if(state.phase !== 'start') return;
-    startGame();
-  }, false);
 
   /* ---- redimensionado ---- */
   window.addEventListener('resize', layout);

@@ -83,14 +83,17 @@
   .bigscore{font-size:52px;font-weight:900;color:#6c5ce7;line-height:1;margin:8px 0 2px;
     text-shadow:0 3px 0 #e6e1ff;}
   .btnrow{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:6px;}
+  .times{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:10px 0 4px;}
+  .btn.time{padding:12px 18px;font-size:15px;}
 </style>
 </head>
 <body>
 <div id="app">
   <header id="hud">
-    <div class="chip grow"><span class="k" id="k-word">1ª MAYÚS · 1/6</span><b id="hud-word">Hola</b></div>
+    <div class="chip grow"><span class="k" id="k-word">1ª MAYÚS</span><b id="hud-word">Hola</b></div>
     <div class="chip"><span class="k">Letra</span><b id="hud-letter">1/4</b></div>
-    <div class="chip"><span class="k">Puntos</span><b id="hud-score">0</b></div>
+    <div class="chip"><span class="k">Hechas</span><b id="hud-solved">0</b></div>
+    <div class="chip"><span class="k">Tiempo</span><b id="hud-time">0:00</b></div>
     <button id="btn-reset" type="button" aria-label="Reiniciar">⟲</button>
   </header>
   <main id="stage"><canvas id="game"></canvas></main>
@@ -99,34 +102,24 @@
 <div id="overlay" class="overlay">
   <div class="panel">
     <h1>Traza las Palabras ✏️</h1>
-    <p class="sub">Método <b>cielo · siembra · tierra</b></p>
-    <div class="legend">
-      <div><span class="dot sky"></span> Cielo — donde suben las letras</div>
-      <div><span class="dot grass"></span> Siembra — la mitad de la letra</div>
-      <div><span class="dot ground"></span> Tierra — donde se apoyan</div>
+    <p class="sub">¿Cuánto tiempo quieres jugar?</p>
+    <div class="times" id="times">
+      <button type="button" class="btn time" data-min="1">1 min</button>
+      <button type="button" class="btn time" data-min="2">2 min</button>
+      <button type="button" class="btn time" data-min="5">5 min</button>
+      <button type="button" class="btn time" data-min="10">10 min</button>
     </div>
-    <p class="how">Arrastra el dedo desde el punto verde y sigue el caminito de cada trazo.
-      Se traza <b>una letra a la vez</b>, grande y clara, hasta completar la palabra.<br>
-      La palabra siempre lleva la <b>primera letra en MAYÚSCULA</b> y <b>el resto en minúsculas</b>,
-      sin importar cómo llegue del servicio de palabras.<br>
-      También puedes usar las <b>flechas</b> o <b>WASD</b>.</p>
-    <p class="tip">Arriba verás <b>en qué parte de la palabra vas</b>: las letras ya hechas se ponen
-      <b class="pill">verdes</b>, la actual brilla en <b class="pill lo">naranja</b> y las que faltan
-      quedan grises. La etiqueta <b class="pill up">1ª MAYÚS</b> te recuerda que la primera letra
-      se traza como mayúscula (cielo → tierra) y las demás como minúsculas (siembra → tierra).</p>
-    <button id="btn-start" type="button" class="btn">¡Jugar!</button>
-    <p class="sub" style="margin-top:12px;font-size:11.5px;opacity:.75">Toca en cualquier parte para empezar</p>
   </div>
 </div>
 
 <div id="win" class="overlay hidden">
   <div class="panel">
-    <h1 id="win-title">¡Excelente trabajo! 🌟</h1>
-    <p class="sub" id="win-sub">Trazaste varias palabras completas</p>
+    <h1 id="win-title">¡Se acabó el tiempo! ⏰</h1>
+    <p class="sub" id="win-sub">Trazaste varias palabras</p>
     <div class="bigscore" id="win-score">0</div>
-    <p class="sub">puntos</p>
+    <p class="sub">palabras</p>
     <div class="btnrow">
-      <button id="btn-next" type="button" class="btn">Seguir</button>
+      <button id="btn-next" type="button" class="btn">Cambiar tiempo</button>
       <button id="btn-again" type="button" class="btn purple">Jugar otra vez</button>
     </div>
   </div>
@@ -578,7 +571,6 @@ let wordBarFs = 18, wordBarH = 40;
 const TOP_RESERVE  = 0.26;
 const BOTTOM_DEPTH = 0.34;
 
-const WORDS_PER_ROUND = 6;
 const POP_DUR = 0.32;
 
 function layout(){
@@ -636,12 +628,15 @@ const state = {
   word: 'Hola',            // palabra tal como se muestra (1ª MAYÚS + resto minús)
   chars: ['H','o','l','a'],
   letterIdx: 0,
-  strokeIdx: 0,
-  progress: 0,
+  strokes: [],             // trazos de la letra actual
+  cover: [],               // puntos ya trazados por trazo (Uint8Array)
+  covered: [],             // cuántos puntos lleva cada trazo
+  lastPaint: null,         // último punto tocado (cubre trazos rápidos)
   lastTick: 0,
   tracing: false,
+  timeUp: false,
   celebrateT: 0,
-  wordsDone: 0,
+  solved: 0,
   shake: 0,
   popT: 0,
   particles: [],
@@ -652,7 +647,8 @@ const state = {
 
 const hudWord   = qs('hud-word');
 const hudLetter = qs('hud-letter');
-const hudScore  = qs('hud-score');
+const hudSolved = qs('hud-solved');
+const hudTime   = qs('hud-time');
 const kWord     = qs('k-word');
 const overlay   = qs('overlay');
 const winOverlay= qs('win');
@@ -665,6 +661,37 @@ function currentChar(){
 }
 function curStrokes(){ return compileLetter(currentChar()); }
 
+/* Sesión por tiempo */
+let sessionMinutes = 2;
+let endsAt = 0;
+let clockId = null;
+
+function formatClock(ms){
+  const total = Math.max(0, Math.ceil(ms/1000));
+  return Math.floor(total/60) + ':' + String(total%60).padStart(2,'0');
+}
+function stopClock(){ if(clockId){ clearInterval(clockId); clockId = null; } }
+function paintClock(){ hudTime.textContent = formatClock(endsAt - performance.now()); }
+
+/* Prepara la cobertura de trazos de la letra actual. */
+function prepareLetter(){
+  const strokes = curStrokes();
+  state.strokes = strokes;
+  state.cover = strokes.map(function(pts){ return new Uint8Array(pts.length); });
+  state.covered = strokes.map(function(){ return 0; });
+  state.lastPaint = null;
+  state.lastTick = 0;
+  state.tracing = false;
+}
+function strokeDone(s){
+  const pts = state.strokes[s];
+  return !!pts && state.covered[s] >= pts.length;
+}
+function firstIncomplete(){
+  for(let s=0;s<state.strokes.length;s++){ if(!strokeDone(s)) return s; }
+  return -1;
+}
+
 function updateHUD(){
   const n = Math.max(1, state.chars.length);
   const i = Math.min(state.letterIdx + 1, n);
@@ -675,10 +702,9 @@ function updateHUD(){
     hudWord.classList.add('upper');
   }
   if(hudLetter) hudLetter.textContent = i + '/' + n;
-  if(hudScore)  hudScore.textContent  = state.score;
+  if(hudSolved) hudSolved.textContent = state.solved;
   if(kWord){
-    kWord.textContent = '1ª MAYÚS · ' +
-      Math.min(state.wordsDone + 1, WORDS_PER_ROUND) + '/' + WORDS_PER_ROUND;
+    kWord.textContent = '1ª MAYÚS';
     kWord.style.color = '#6c5ce7';
   }
 }
@@ -725,84 +751,93 @@ function wrongFeedback(){
    ============================================================ */
 function tolPx(){ return clamp(letterH * 0.16, 11, 30); }
 
-function tryStart(x, y){
-  const strokes = curStrokes();
-  if(state.strokeIdx >= strokes.length) return false;
-  const pts = strokes[state.strokeIdx];
-  if(!pts || !pts.length) return false;
+/* Cualquier punto de cualquier trazo sirve como entrada: sin orden ni
+   sentido obligatorio. El dedo pinta toda línea que toca. */
+function nearestStrokePoint(x, y, maxDist){
+  let best = null, bestD = maxDist;
+  for(let s=0;s<state.strokes.length;s++){
+    if(strokeDone(s)) continue;
+    const pts = state.strokes[s];
+    for(let i=0;i<pts.length;i++){
+      const sp = toScreen(pts[i]);
+      const d = Math.hypot(sp.x - x, sp.y - y);
+      if(d < bestD){ bestD = d; best = { s: s, i: i }; }
+    }
+  }
+  return best;
+}
+
+function distToSegment(px, py, ax, ay, bx, by){
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx*dx + dy*dy;
+  let t = len2 ? ((px-ax)*dx + (py-ay)*dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t*dx), py - (ay + t*dy));
+}
+
+function paintAt(x, y){
   const tol = tolPx();
+  const prev = state.lastPaint || { x: x, y: y };
+  const wasDone = state.strokes.map(function(_, s){ return strokeDone(s); });
+  let marked = 0;
 
-  const lo = Math.max(0, state.progress - 6);
-  const hi = Math.min(pts.length-1, state.progress + 20);
+  for(let s=0;s<state.strokes.length;s++){
+    if(wasDone[s]) continue;
+    const pts = state.strokes[s];
+    const cover = state.cover[s];
+    for(let i=0;i<pts.length;i++){
+      const sp = toScreen(pts[i]);
+      const d = distToSegment(sp.x, sp.y, prev.x, prev.y, x, y);
+      if(d <= tol && !cover[i]){ cover[i] = 1; state.covered[s]++; marked++; }
+    }
+  }
+  state.lastPaint = { x: x, y: y };
 
-  let best = -1, bestD = Infinity;
-  for(let i=lo;i<=hi;i++){
-    const sp = toScreen(pts[i]);
-    const d = Math.hypot(sp.x - x, sp.y - y);
-    if(d < bestD){ bestD = d; best = i; }
+  if(marked > 0){
+    const now = performance.now();
+    if(now - state.lastTick > 90){ state.lastTick = now; sfx.tick(); }
   }
-  if(bestD < tol * 1.8){
-    state.tracing  = true;
-    state.progress = Math.max(best, state.progress);
-    tone(900, 0.05, 'sine', 0.06);
-    return true;
+
+  const justDone = [];
+  for(let s=0;s<state.strokes.length;s++){
+    if(!wasDone[s] && state.covered[s] >= state.strokes[s].length) justDone.push(s);
   }
-  return false;
+  if(!justDone.length) return;
+
+  state.tracing = false;
+  justDone.forEach(function(s){ awardStroke(s); });
+
+  const next = firstIncomplete();
+  if(next < 0) completeLetter();
+  else if(state.pointer.key) snapKeyboardCursor();
+}
+
+function tryStart(x, y){
+  if(state.phase !== 'play' && state.phase !== 'timeup') return false;
+  const hit = nearestStrokePoint(x, y, tolPx() * 1.8);
+  if(!hit) return false;
+  state.tracing = true;
+  state.lastPaint = { x: x, y: y };
+  tone(900, 0.05, 'sine', 0.06);
+  paintAt(x, y);
+  return true;
 }
 
 function traceAt(x, y){
   if(!state.tracing) return;
-  const strokes = curStrokes();
-  const pts = strokes[state.strokeIdx];
-  if(!pts || !pts.length) return;
-
-  const tol = tolPx();
-  const start = Math.min(state.progress, pts.length-1);
-  const end   = Math.min(pts.length-1, state.progress + 40);
-
-  let best = start, bestD = Infinity;
-  for(let i=start;i<=end;i++){
-    const sp = toScreen(pts[i]);
-    const d = Math.hypot(sp.x - x, sp.y - y);
-    if(d < bestD){ bestD = d; best = i; }
-  }
-
-  if(bestD < tol){
-    if(best > state.progress){
-      state.progress = best;
-      if(state.progress - state.lastTick > 20){
-        state.lastTick = state.progress;
-        sfx.tick();
-      }
-    }
-    if(state.progress >= pts.length - 2) completeStroke();
-  }
+  paintAt(x, y);
 }
 
-function completeStroke(){
-  const strokes = curStrokes();
-  const pts = strokes[state.strokeIdx];
+function awardStroke(s){
+  const pts = state.strokes[s];
   if(!pts || !pts.length) return;
   const endP = toScreen(pts[pts.length-1]);
-
   burst(endP.x, endP.y, 14, ['#ffb86b','#ff7f50','#ffd166','#7be09a']);
   state.shake = Math.max(state.shake, 4);
   sfx.stroke();
-
   state.score += 15;
   addFloat(endP.x, endP.y - 24, '+15', '#ff7f50');
   updateHUD();
-
-  state.strokeIdx++;
-  state.progress = 0;
-  state.lastTick = 0;
-  state.tracing  = false;
-
-  if(state.strokeIdx >= strokes.length){
-    completeLetter();
-  }else if(state.pointer.key){
-    snapKeyboardCursor();
-  }
 }
 
 function completeLetter(){
@@ -833,19 +868,16 @@ function completeLetter(){
 
 function advanceAfterCelebrate(){
   if(state.letterIdx >= state.chars.length - 1){
-    /* palabra terminada */
-    state.wordsDone++;
+    /* palabra terminada = patrón resuelto */
+    state.solved++;
     updateHUD();
-    if(state.wordsDone >= WORDS_PER_ROUND){ endRound(); return; }
+    if(state.timeUp){ endRound(); return; }
     startWord();
     state.phase = 'play';
     updateHUD();
   }else{
     state.letterIdx++;
-    state.strokeIdx = 0;
-    state.progress  = 0;
-    state.lastTick  = 0;
-    state.tracing   = false;
+    prepareLetter();
     state.popT      = POP_DUR;      /* la nueva letra entra con un pop */
     state.phase     = 'play';
     updateHUD();
@@ -863,11 +895,8 @@ function startWord(){
   state.chars = state.word.split('');
 
   state.letterIdx = 0;
-  state.strokeIdx = 0;
-  state.progress  = 0;
-  state.lastTick  = 0;
-  state.tracing   = false;
   state.popT      = POP_DUR;
+  prepareLetter();
   layout();
   updateHUD();
   speak(base);
@@ -876,10 +905,12 @@ function startWord(){
 
 function endRound(){
   state.phase = 'win';
-  winScore.textContent = state.score;
-  winTitle.textContent = '¡Excelente trabajo! 🎉';
-  winSub.textContent   = 'Trazaste ' + WORDS_PER_ROUND +
-    ' palabras con la inicial en MAYÚSCULA y el resto en minúsculas';
+  stopClock();
+  paintClock();
+  winScore.textContent = state.solved;
+  winTitle.textContent = '¡Se acabó el tiempo! ⏰';
+  winSub.textContent   = state.solved + (state.solved === 1 ? ' palabra · ' : ' palabras · ') +
+    state.score + ' puntos';
   winOverlay.classList.remove('hidden');
   sfx.win();
   speak('¡Muy bien!');
@@ -889,16 +920,17 @@ function endRound(){
    KEYBOARD CURSOR
    ============================================================ */
 function snapKeyboardCursor(){
-  const strokes = curStrokes();
-  if(!strokes || state.strokeIdx >= strokes.length) return;
-  const st = strokes[state.strokeIdx];
-  if(!st || !st.length) return;
-  const p = toScreen(st[0]);
+  const s = firstIncomplete();
+  if(s < 0) return;
+  const pts = state.strokes[s];
+  if(!pts || !pts.length) return;
+  let i = 0;
+  while(i < pts.length && state.cover[s][i]) i++;
+  const p = toScreen(pts[Math.min(i, pts.length-1)]);
   state.pointer.x = p.x;
   state.pointer.y = p.y;
   state.pointer.active = true;
   state.pointer.key = true;
-  state.progress = 0;
   state.tracing = true;
 }
 
@@ -1021,24 +1053,13 @@ window.addEventListener('keydown', function(e){
   if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
 
   if(k === ' ' || k === 'enter'){
-    if(state.phase === 'start'){ unlockAudio(); startGame(); return; }
     if(state.phase === 'win'){ unlockAudio(); restartGame(); return; }
   }
   if(state.phase !== 'play') return;
   if(!KEYMAP[k]) return;
 
   if(!state.pointer.active || !state.pointer.key){
-    const strokes = curStrokes();
-    const st = strokes[state.strokeIdx];
-    if(st && st.length){
-      const sp = toScreen(st[0]);
-      state.pointer.x = sp.x;
-      state.pointer.y = sp.y;
-      state.pointer.active = true;
-      state.pointer.key = true;
-      state.progress = 0;
-      state.tracing = true;
-    }
+    snapKeyboardCursor();
   }
   keys.add(k);
 });
@@ -1184,7 +1205,7 @@ function drawWord(){
   const chars = state.chars;
   if(!chars || !chars.length) return;
   const cur = clamp(state.letterIdx, 0, chars.length - 1);
-  const strokes = compileLetter(chars[cur]);
+  const strokes = (state.strokes && state.strokes.length) ? state.strokes : compileLetter(chars[cur]);
   if(!strokes || !strokes.length) return;
 
   const thickTraced = Math.max(4, letterH * 0.070);
@@ -1207,129 +1228,56 @@ function drawWord(){
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  /* --- resaltado suave del área de la letra --- */
-  {
-    let dx0 = Infinity, dx1 = -Infinity, dy0 = Infinity, dy1 = -Infinity;
-    for(let i=0;i<strokes.length;i++){
-      const pts = strokes[i];
-      for(let j=0;j<pts.length;j++){
-        const p = toScreenAt(pts[j]);
-        if(p.x<dx0)dx0=p.x; if(p.x>dx1)dx1=p.x;
-        if(p.y<dy0)dy0=p.y; if(p.y>dy1)dy1=p.y;
-      }
-    }
-    if(isFinite(dx0) && isFinite(dy0)){
-      const padX = letterW*0.20, padY = letterH*0.09;
-      const t = performance.now()/1000;
-      ctx.save();
-      ctx.globalAlpha = 0.36 + 0.20*Math.sin(t*3);
-      ctx.fillStyle = 'rgba(255,196,140,.55)';
-      roundRect(dx0-padX, dy0-padY, (dx1-dx0)+padX*2, (dy1-dy0)+padY*2,
-                Math.min(20, letterW*0.30));
-      ctx.fill();
-      ctx.restore();
-    }
-  }
-
   /* --- trazos --- */
   for(let s=0;s<strokes.length;s++){
     const pts = strokes[s];
     if(!pts || pts.length < 2) continue;
 
-    if(s < state.strokeIdx){
+    if(strokeDone(s)){
       /* ya hecho */
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(126,205,126,.92)';
       ctx.lineWidth = thickTraced;
       strokePoly(pts);
+      continue;
+    }
 
-    }else if(s === state.strokeIdx){
-      /* guía punteada de lo que falta por trazar */
-      if(state.progress < pts.length - 1){
-        ctx.setLineDash(dash);
-        ctx.strokeStyle = 'rgba(150,168,190,.8)';
-        ctx.lineWidth = thickGhost;
-        strokePoly(pts.slice(Math.max(0, state.progress)));
-        ctx.setLineDash([]);
-      }
-      /* lo ya trazado */
-      if(state.progress > 0){
-        const traced = pts.slice(0, Math.min(state.progress + 1, pts.length));
-        ctx.setLineDash([]);
+    /* guía punteada completa: se puede empezar por cualquier punto */
+    ctx.setLineDash(dash);
+    ctx.strokeStyle = 'rgba(160,178,198,.55)';
+    ctx.lineWidth = thickGhost;
+    strokePoly(pts);
+    ctx.setLineDash([]);
+
+    const cover = (state.cover[s] && state.cover[s].length === pts.length) ? state.cover[s] : new Uint8Array(pts.length);
+    const paintRun = function(run){
+      if(run.length > 1){
         ctx.strokeStyle = '#ff7f50';
         ctx.lineWidth = thickTraced;
         ctx.shadowColor = 'rgba(255,127,80,.6)';
         ctx.shadowBlur = letterH * 0.06;
-        strokePoly(traced);
+        strokePoly(run);
         ctx.shadowBlur = 0;
-
-        const head = toScreen(pts[clamp(state.progress, 0, pts.length-1)]);
+      }else if(run.length === 1){
+        const q = toScreen(run[0]);
         ctx.beginPath();
-        ctx.arc(head.x, head.y, Math.max(3, letterH*0.040), 0, TAU);
-        ctx.fillStyle = '#ffc09b';
+        ctx.arc(q.x, q.y, thickTraced*0.5, 0, TAU);
+        ctx.fillStyle = '#ff7f50';
         ctx.fill();
       }
-
-    }else{
-      /* trazos pendientes */
-      ctx.setLineDash(dash);
-      ctx.strokeStyle = 'rgba(160,178,198,.55)';
-      ctx.lineWidth = thickGhost;
-      strokePoly(pts);
-      ctx.setLineDash([]);
+    };
+    let run = [];
+    for(let i=0;i<pts.length;i++){
+      if(cover[i]){
+        run.push(pts[i]);
+      }else{
+        paintRun(run);
+        run = [];
+      }
     }
+    paintRun(run);
   }
 
-  /* --- puntos de inicio --- */
-  const t = performance.now() / 1000;
-  for(let s=state.strokeIdx; s<strokes.length; s++){
-    const pts = strokes[s];
-    if(!pts || !pts.length) continue;
-    const p = toScreen(pts[0]);
-    const isCurrent = (s === state.strokeIdx);
-    const pulse = isCurrent ? 1 + 0.13*Math.sin(t*6) : 1;
-    const r = Math.max(8, letterH * (isCurrent ? 0.058 : 0.044)) * pulse;
-
-    if(isCurrent){
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r*1.7, 0, TAU);
-      ctx.fillStyle = 'rgba(46,204,113,.18)';
-      ctx.fill();
-    }
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, TAU);
-    ctx.fillStyle = isCurrent ? '#2ecc71' : 'rgba(160,180,200,.65)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.85)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.fillStyle = '#fff';
-    ctx.font = '800 ' + Math.max(9, r*1.2) + 'px -apple-system,Segoe UI,Roboto,sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(s+1), p.x, p.y + r*0.06);
-
-    if(isCurrent && state.progress === 0 && pts.length > 10){
-      const a = toScreen(pts[0]);
-      const b = toScreen(pts[Math.min(9, pts.length-1)]);
-      const ang = Math.atan2(b.y-a.y, b.x-a.x);
-      const d = r*2.3;
-      const ax = a.x + Math.cos(ang)*d;
-      const ay = a.y + Math.sin(ang)*d;
-      ctx.save();
-      ctx.translate(ax, ay);
-      ctx.rotate(ang);
-      ctx.beginPath();
-      ctx.moveTo(r*0.8, 0);
-      ctx.lineTo(-r*0.5, -r*0.68);
-      ctx.lineTo(-r*0.5, r*0.68);
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(46,204,113,.85)';
-      ctx.fill();
-      ctx.restore();
-    }
-  }
 
   ctx.restore();
 }
@@ -1489,25 +1437,24 @@ function render(){
 function resetState(){
   state.score = 0;
   state.letterIdx = 0;
-  state.strokeIdx = 0;
-  state.progress  = 0;
-  state.lastTick  = 0;
-  state.tracing   = false;
+  state.solved = 0;
+  state.timeUp = false;
+  state.lastTick = 0;
+  state.tracing = false;
   state.celebrateT = 0;
-  state.wordsDone = 0;
   state.shake = 0;
-  state.popT  = 0;
+  state.popT = 0;
   state.particles.length = 0;
   state.floats.length = 0;
   state.toast = null;
   state.pointer.active = false;
   state.pointer.key = false;
   keys.clear();
+  prepareLetter();
 }
 
-/* Idempotente: si ya está jugando, no hace nada. */
-function startGame(){
-  if(state.phase === 'play' || state.phase === 'celebrate') return;
+function startSession(minutes){
+  sessionMinutes = minutes;
   state.phase = 'play';
   try{
     unlockAudio();
@@ -1515,38 +1462,43 @@ function startGame(){
     resetState();
     if(overlay)    overlay.classList.add('hidden');
     if(winOverlay) winOverlay.classList.add('hidden');
+    hudTime.style.color = '#2c3e50';
+    endsAt = performance.now() + minutes * 60000;
+    stopClock();
+    paintClock();
+    clockId = setInterval(function(){
+      if(state.phase === 'win'){ stopClock(); return; }
+      paintClock();
+      if(!state.timeUp && performance.now() >= endsAt) endTime();
+    }, 250);
     startWord();
     updateHUD();
     fetchWords();
-  }catch(err){
-    console.error('startGame', err);
-  }
+  }catch(err){ console.error('startSession', err); }
+}
+
+/* Se acabó el tiempo: no aparece otra palabra, pero la que está en pantalla
+   se puede terminar. La sesión cierra sola al completarla. */
+function endTime(){
+  state.timeUp = true;
+  paintClock();
+  hudTime.style.color = '#ff4d6d';
+  if(state.phase === 'celebrate') return;
+  sfx.wrong();
+  showToast('¡Tiempo! Termina esta palabra');
+}
+
+function showSetup(){
+  stopClock();
+  state.phase = 'start';
+  if(winOverlay) winOverlay.classList.add('hidden');
+  if(overlay)    overlay.classList.remove('hidden');
+  hudTime.textContent = '0:00';
+  hudTime.style.color = '#2c3e50';
 }
 
 function restartGame(){
-  state.phase = 'play';
-  try{
-    unlockAudio();
-    sfx.click();
-    resetState();
-    if(winOverlay) winOverlay.classList.add('hidden');
-    if(overlay)    overlay.classList.add('hidden');
-    startWord();
-    updateHUD();
-    fetchWords();
-  }catch(err){ console.error('restartGame', err); }
-}
-
-function continueRound(){
-  state.phase = 'play';
-  try{
-    unlockAudio();
-    sfx.click();
-    if(winOverlay) winOverlay.classList.add('hidden');
-    state.wordsDone = 0;
-    startWord();
-    updateHUD();
-  }catch(err){ console.error('continueRound', err); }
+  startSession(sessionMinutes);
 }
 
 /* ============================================================
@@ -1634,54 +1586,15 @@ function boot(){
   }, { passive:false });
 
   /* ---- BOTONES ---- */
-  bindTap(qs('btn-start'), startGame);
+  document.querySelectorAll('#times [data-min]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      try{ unlockAudio(); }catch(_){}
+      startSession(Number(btn.dataset.min));
+    });
+  });
   bindTap(qs('btn-again'), restartGame);
-  bindTap(qs('btn-next'),  continueRound);
+  bindTap(qs('btn-next'),  showSetup);
   bindTap(qs('btn-reset'), function(){ restartGame(); });
-
-  /* ---- TOCAR EN CUALQUIER PARTE DEL OVERLAY INICIA EL JUEGO ---- */
-  let ovStartPt = null;
-
-  function ovPoint(e){
-    if(e.touches && e.touches.length) return e.touches[0];
-    if(e.changedTouches && e.changedTouches.length) return e.changedTouches[0];
-    return e;
-  }
-  function ovDown(e){
-    if(state.phase !== 'start') return;
-    const p = ovPoint(e);
-    if(p && typeof p.clientX === 'number'){
-      ovStartPt = { x: p.clientX, y: p.clientY };
-    }else{
-      ovStartPt = null;
-    }
-    try{ unlockAudio(); }catch(_){}
-  }
-  function ovUp(e){
-    if(state.phase !== 'start') return;
-    const p = ovPoint(e);
-    if(ovStartPt && p && typeof p.clientX === 'number'){
-      const d = Math.hypot(p.clientX - ovStartPt.x, p.clientY - ovStartPt.y);
-      if(d > 18) return;
-    }
-    if(e && e.cancelable){ try{ e.preventDefault(); }catch(_){} }
-    startGame();
-  }
-
-  overlay.addEventListener('pointerdown', ovDown, { passive:true });
-  overlay.addEventListener('touchstart',  ovDown, { passive:true });
-  overlay.addEventListener('mousedown',   ovDown, { passive:true });
-
-  overlay.addEventListener('pointerup',   ovUp, { passive:false });
-  overlay.addEventListener('touchend',    ovUp, { passive:false });
-  overlay.addEventListener('mouseup',     ovUp, { passive:false });
-  overlay.addEventListener('click',       ovUp, { passive:false });
-
-  /* ---- Red de seguridad global ---- */
-  document.addEventListener('click', function(){
-    if(state.phase !== 'start') return;
-    startGame();
-  }, false);
 
   /* ---- redimensionado ---- */
   window.addEventListener('resize', layout);
@@ -1697,6 +1610,7 @@ function boot(){
   }
   setTimeout(layout, 80);
   setTimeout(layout, 400);
+  prepareLetter();
 
   /* ---- precompilar todas las letras (minúsculas Y MAYÚSCULAS) ---- */
   ALPHABET.forEach(function(ch){
